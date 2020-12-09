@@ -1,0 +1,49 @@
+on: [push, pull_request]
+
+name: Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Install Toolchain
+        run: curl -L https://github.com/dimkr/toolchains/releases/latest/download/arm-any32-linux-musleabi.tar.gz | sudo tar -xzvf - -C /
+      - name: ARM Build
+        run: |
+          . /opt/x-tools/arm-any32-linux-musleabi/activate
+          arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-arm
+          arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-aufs-arm
+          arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-arm
+          arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-overlayfs-arm
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: v${{ github.run_number }}
+          release_name: v${{ github.run_number }}
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./frugalify-aufs-arm
+          asset_name: frugalify-aufs-arm
+          asset_content_type: application/x-executable
+      - name: Upload Release Asset 2
+        id: upload-release-asset-2
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./frugalify-overlayfs-arm
+          asset_name: frugalify-overlayfs-arm
+          asset_content_type: application/x-executable
