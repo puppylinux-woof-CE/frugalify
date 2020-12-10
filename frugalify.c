@@ -196,7 +196,7 @@ cpy:
     rmdir("/save/dev");
 
     // mount a union file system with the SFS mount points and /save on top
-    if (mount(FS, "/save/.pup_new", FS, 0, br) < 0)
+    if (mount(FS, "/save/.pup_new", FS, MS_NOATIME, br) < 0)
         return EXIT_FAILURE;
     
     if (chdir("/save/.pup_new") < 0)
