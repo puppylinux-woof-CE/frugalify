@@ -122,6 +122,8 @@ int main(int argc, char *argv[])
     if (getpid() != 1)
         return EXIT_FAILURE;
 
+    mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, NULL);
+
     root = opendir("/");
     if (!root)
         return EXIT_FAILURE;
