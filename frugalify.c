@@ -108,6 +108,7 @@ int main(int argc, char *argv[])
 #endif
         "/save/.pup_new",
         "/save/dev",
+        "/save/initrd",
     };
     static char br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
@@ -199,13 +200,16 @@ cpy:
     if (mount(FS, "/save/.pup_new", FS, MS_NOATIME, br) < 0)
         return EXIT_FAILURE;
     
+    // give processes running with the union file system as / a directory
+    // outside of the union file system that can be used to add aufs branches
+    if (mount("/", "/save/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
+        return EXIT_FAILURE;
+
     if (chdir("/save/.pup_new") < 0)
         return EXIT_FAILURE;
 
-    // make the union file system the file system root
-    if (mount(".", "/", FS, MS_MOVE, NULL) < 0)
-        return EXIT_FAILURE;
-
+    // make the union file system the file system root for the real init and
+    // its children
     if (chroot(".") < 0)
         return EXIT_FAILURE;
 
