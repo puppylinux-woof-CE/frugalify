@@ -131,7 +131,7 @@ int main(int argc, char *argv[])
     
     // create a list of all SFS files under /
     while ((readdir_r(root, &ent[nsfs], &pent) == 0) && (pent != NULL)) {
-        if (pent->d_type != DT_REG)
+        if ((pent->d_type != DT_REG) && (pent->d_type != DT_LNK))
             continue;
 
         len = strlen(pent->d_name);
