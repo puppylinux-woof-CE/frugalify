@@ -110,11 +110,12 @@ int main(int argc, char *argv[])
         "/save/dev",
         "/save/initrd",
     };
-    static char br[1024] = FSOPTS_HEAD;
+    static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
-    const char *sfs[MAXSFS] = {NULL}, *loop;
-    char sfsmnt[sizeof("/save/.sfs0")] = "/save/.sfs";
+    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/save/.sfs0")] = "/save/.sfs";
+    const char *loop;
     size_t len, brlen = sizeof(FSOPTS_HEAD) - 1;
+    ssize_t out;
     DIR *root;
     struct dirent *pent;
     unsigned int nsfs = 0, i;
@@ -131,15 +132,30 @@ int main(int argc, char *argv[])
     
     // create a list of all SFS files under /
     while ((readdir_r(root, &ent[nsfs], &pent) == 0) && (pent != NULL)) {
-        if ((pent->d_type != DT_REG) && (pent->d_type != DT_LNK))
-            continue;
-
         len = strlen(pent->d_name);
         if ((len <= sizeof(".sfs") - 1) || 
             (memcmp(&pent->d_name[len - 4], ".sfs", sizeof(".sfs") - 1) != 0))
             continue;
 
         sfs[nsfs] = pent->d_name;
+        switch (pent->d_type) {
+        case DT_REG:
+            break;
+
+        case DT_LNK:
+            out = readlink(pent->d_name,
+                           sfspath[nsfs],
+                           sizeof(sfspath[nsfs]) - 1);
+            if (out <= 0)
+                continue;
+            sfspath[nsfs][out] = '\0';
+            sfs[nsfs] = sfspath[nsfs];
+            break;
+
+        default:
+            continue;
+        }
+
         ++nsfs;
         if (nsfs == MAXSFS)
             break;
