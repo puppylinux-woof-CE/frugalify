@@ -108,7 +108,9 @@ int main(int argc, char *argv[])
 #endif
         "/save/.pup_new",
         "/save/dev",
+#ifdef HAVE_AUFS
         "/save/initrd",
+#endif
     };
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
@@ -216,16 +218,23 @@ cpy:
     if (mount(FS, "/save/.pup_new", FS, MS_NOATIME, br) < 0)
         return EXIT_FAILURE;
     
+#ifdef HAVE_AUFS
     // give processes running with the union file system as / a directory
     // outside of the union file system that can be used to add aufs branches
     if (mount("/", "/save/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
+#endif
 
     if (chdir("/save/.pup_new") < 0)
         return EXIT_FAILURE;
 
-    // make the union file system the file system root for the real init and
-    // its children
+    // make the union file system the the file system root, or the file system
+    // root for the real init and its children
+#ifndef HAVE_AUFS
+    if (mount(".", "/", FS, MS_MOVE, NULL) < 0)
+        return EXIT_FAILURE;
+#endif
+
     if (chroot(".") < 0)
         return EXIT_FAILURE;
 
