@@ -26,6 +26,8 @@
 #   define FSOPTS_HEAD "upperdir=/save,workdir=/.work,lowerdir="
 #endif
 
+#define CLEAR_TTY "\033[2J\033[H"
+
 static inline void do_autoclose(void *fdp)
 {
 	if (*(int *)fdp != -1)
@@ -126,6 +128,9 @@ int main(int argc, char *argv[])
     // protect against accidental click
     if (getpid() != 1)
         return EXIT_FAILURE;
+
+    // clear firmware and bootloader output on the screen
+    write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY - 1));
 
     mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, NULL);
 
