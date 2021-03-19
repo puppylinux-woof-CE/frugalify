@@ -101,6 +101,23 @@ static void losetup_d(const int i)
         ioctl(loopfd, LOOP_CLR_FD, 0);
 }
 
+static int sfscmp(const void *a, const void *b)
+{
+    const char *as = *(const char **)a, *bs = *(const char **)b;
+    int m, n;
+
+    m = strncmp(as, "puppy_", sizeof("puppy_") - 1);
+    n = strncmp(bs, "puppy_", sizeof("puppy_") - 1);
+
+    if ((m == 0) && (n != 0))
+        return -1;
+
+    if ((m != 0) && (n == 0))
+        return 1;
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     static const char *dirs[] = {
@@ -114,7 +131,7 @@ int main(int argc, char *argv[])
     };
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
-    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/save/.sfs0")] = "/save/.sfs";
+    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/save/.sfs0")] = "/save/.sfs", *tmp;
     const char *loop;
     size_t len, brlen = sizeof(FSOPTS_HEAD) - 1;
     ssize_t out;
@@ -192,6 +209,9 @@ int main(int argc, char *argv[])
     if (mount("dev", "/save/dev", "devtmpfs", 0, NULL) < 0)
         return EXIT_FAILURE;
     
+    // make sure adrv, zdrv, etc' come after the main SFS
+    qsort(sfs, (size_t)nsfs, sizeof(sfs[0]), sfscmp);
+
     for (i = 0; (i < nsfs) && (brlen < sizeof(br)); ++i) {
         itoa(sfsmnt + sizeof("/save/.sfs") - 1, i);
 
