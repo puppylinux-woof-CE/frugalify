@@ -103,8 +103,20 @@ static void losetup_d(const int i)
 
 static int sfscmp(const void *a, const void *b)
 {
-    const char *as = *(const char **)a, *bs = *(const char **)b;
+    const char *as = *(const char **)a, *bs = *(const char **)b, *abase, *bbase;
     int m, n;
+
+    abase = strrchr(as, '/');
+    if (abase)
+        as = &abase[1];
+    else
+        abase = as;
+
+    bbase = strrchr(bs, '/');
+    if (bbase)
+        bbase = &bbase[1];
+    else
+        bbase = bs;
 
     m = strncmp(as, "puppy_", sizeof("puppy_") - 1);
     n = strncmp(bs, "puppy_", sizeof("puppy_") - 1);
