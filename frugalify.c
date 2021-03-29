@@ -108,7 +108,7 @@ static int sfscmp(const void *a, const void *b)
 
     abase = strrchr(as, '/');
     if (abase)
-        as = &abase[1];
+        abase = &abase[1];
     else
         abase = as;
 
@@ -118,8 +118,8 @@ static int sfscmp(const void *a, const void *b)
     else
         bbase = bs;
 
-    m = strncmp(as, "puppy_", sizeof("puppy_") - 1);
-    n = strncmp(bs, "puppy_", sizeof("puppy_") - 1);
+    m = strncmp(abase, "puppy_", sizeof("puppy_") - 1);
+    n = strncmp(bbase, "puppy_", sizeof("puppy_") - 1);
 
     if ((m == 0) && (n != 0))
         return 1;
