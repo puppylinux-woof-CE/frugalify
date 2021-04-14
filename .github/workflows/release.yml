@@ -11,15 +11,21 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Install Toolchains
         run: |
           curl -L https://github.com/dimkr/toolchains/releases/latest/download/arm-any32-linux-musleabi.tar.gz | sudo tar -xzf - -C /
           curl -L https://github.com/dimkr/toolchains/releases/latest/download/i386-any32-linux-musl.tar.gz | sudo tar -xzf - -C /
+          mkdir -p linux
+          curl -o linux/fscrypt.h "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/include/uapi/linux/fscrypt.h?h=linux-5.4.y&id=8f55ad4daf001b6ee8ddf672e14475a35403b258"
       - name: ARM Build
         run: |
           . /opt/x-tools/arm-any32-linux-musleabi/activate
           arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-arm
           arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-aufs-arm
+          arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS -DHAVE_FSCRYPT -I. -Imbedtls/include -DMBEDTLS_SHA512_C -DMBEDTLS_CONFIG_FILE=\"/dev/null\" frugalify.c mbedtls/library/sha512.c $LDFLAGS -o frugalify-aufs-fscrypt-arm
+          arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-aufs-fscrypt-arm
           arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-arm
           arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-overlayfs-arm
       - name: x86 Build
@@ -27,6 +33,8 @@ jobs:
           . /opt/x-tools/i386-any32-linux-musl/activate
           i386-any32-linux-musl-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-i386
           i386-any32-linux-musl-strip -s -R .note -R .comment frugalify-aufs-i386
+          i386-any32-linux-musl-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS -I. -Imbedtls/include -DMBEDTLS_SHA512_C -DMBEDTLS_CONFIG_FILE=\"/dev/null\" frugalify.c mbedtls/library/sha512.c $LDFLAGS -o frugalify-aufs-fscrypt-i386
+          i386-any32-linux-musl-strip -s -R .note -R .comment frugalify-aufs-fscrypt-i386
           i386-any32-linux-musl-cc $CFLAGS -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-i386
           i386-any32-linux-musl-strip -s -R .note -R .comment frugalify-overlayfs-i386
       - name: Create Release
@@ -56,8 +64,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
-          asset_path: ./frugalify-overlayfs-arm
-          asset_name: frugalify-overlayfs-arm
+          asset_path: ./frugalify-aufs-fscrypt-arm
+          asset_name: frugalify-aufs-fscrypt-arm
           asset_content_type: application/x-executable
       - name: Upload Release Asset 3
         id: upload-release-asset-3
@@ -66,11 +74,31 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
-          asset_path: ./frugalify-aufs-i386
-          asset_name: frugalify-aufs-i386
+          asset_path: ./frugalify-overlayfs-arm
+          asset_name: frugalify-overlayfs-arm
           asset_content_type: application/x-executable
       - name: Upload Release Asset 4
         id: upload-release-asset-4
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./frugalify-aufs-i386
+          asset_name: frugalify-aufs-i386
+          asset_content_type: application/x-executable
+      - name: Upload Release Asset 5
+        id: upload-release-asset-5
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./frugalify-aufs-fscrypt-i386
+          asset_name: frugalify-aufs-fscrypt-i386
+          asset_content_type: application/x-executable
+      - name: Upload Release Asset 6
+        id: upload-release-asset-6
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

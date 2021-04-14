@@ -45,6 +45,18 @@ The result is an initramfs-less Puppy installation that combines the advantages 
 3. Persistent storage is implemented using a disk partition, and the user does not have to reserve space for it, or think about available free space (i.e. empty the browser cache) all the time.
 4. It's portable: if the kernel can mount the partition, a semi-frugal installation using frugalify is possible.
 
+## Union File Systems
+
+frugalify supports:
+- [overlay](https://www.kernel.org/doc/html/latest/filesystems/overlayfs.html)
+- [aufs](http://aufs.sourceforge.net/)
+
+## Encryption
+
+The [aufs](http://aufs.sourceforge.net/) variant of frugalify supports encryption of the */save* directory using [file system level encryption](https://www.kernel.org/doc/html/latest/filesystems/fscrypt.html).
+
+In every boot, the user is required to specify a passphrase. frugalify computes its SHA512 using [mbedtls](https://tls.mbed.org) to generate a 64-byte encryption key.
+
 ## Releases
 
 Pre-built, statically-linked and [portable](https://github.com/dimkr/toolchains/) binaries linked against [musl](https://musl.libc.org/) are available in the [releases page](https://github.com/dimkr/frugalify/releases).

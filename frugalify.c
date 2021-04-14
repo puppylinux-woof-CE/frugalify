@@ -12,6 +12,11 @@
 #include <errno.h>
 #include <sys/mount.h>
 
+#ifdef HAVE_FSCRYPT
+#   include <linux/fscrypt.h>
+#   include <mbedtls/sha512.h>
+#endif
+
 #ifndef LOOP_CTL_GET_FREE
 #   define LOOP_CTL_GET_FREE 0x4C82
 #endif
@@ -27,6 +32,8 @@
 #endif
 
 #define CLEAR_TTY "\033[2J\033[H"
+#define HIDE_KEY "\033[32m\033[102m"
+#define RESET_TTY "\033[39m\033[49m"
 
 static inline void do_autoclose(void *fdp)
 {
@@ -130,10 +137,88 @@ static int sfscmp(const void *a, const void *b)
     return 0;
 }
 
+#ifdef HAVE_FSCRYPT
+
+static unsigned int read_key(unsigned char key[FSCRYPT_MAX_KEY_SIZE])
+{
+    unsigned char buf[32];
+    unsigned int len;
+    ssize_t out;
+
+    for (len = 0; len < sizeof(buf); ++len) {
+        if (read(STDIN_FILENO, &buf[len], sizeof(buf[len]) ) != sizeof(buf[len]))
+            return 0;
+
+        if (buf[len] == '\n')
+            break;
+    }
+
+    mbedtls_sha512_ret(buf, len, key, 0);
+    return len;
+}
+
+static void fscrypt(const char *path)
+{
+    static unsigned char buf[sizeof(struct fscrypt_add_key_arg) + FSCRYPT_MAX_KEY_SIZE];
+    struct fscrypt_add_key_arg *arg = (struct fscrypt_add_key_arg *)buf;
+    struct fscrypt_remove_key_arg remove = {
+        .key_spec = {
+            .type = FSCRYPT_KEY_SPEC_TYPE_IDENTIFIER,
+        },
+    };
+    struct fscrypt_policy_v2 policy = {
+        .version = FSCRYPT_POLICY_V2,
+        .contents_encryption_mode = FSCRYPT_MODE_AES_256_XTS,
+        .filenames_encryption_mode = FSCRYPT_MODE_AES_256_CTS,
+        .flags = FSCRYPT_POLICY_FLAGS_PAD_32,
+    };
+    unsigned int len;
+    int fd;
+
+    if (write(STDOUT_FILENO, "Key: ", sizeof("Key: ") - 1) != sizeof("Key: ") - 1)
+        return;
+
+    write(STDOUT_FILENO, HIDE_KEY, sizeof(HIDE_KEY) - 1);
+    len = read_key(&buf[sizeof(*arg)]);
+    write(STDOUT_FILENO, RESET_TTY, sizeof(RESET_TTY) - 1);
+    if (len == 0)
+        return;
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return;
+
+    *arg = (struct fscrypt_add_key_arg){
+        .key_spec = {
+            .type = FSCRYPT_KEY_SPEC_TYPE_IDENTIFIER,
+        },
+        .raw_size = sizeof(buf) - sizeof(*arg),
+    };
+
+    if (ioctl(fd, FS_IOC_ADD_ENCRYPTION_KEY, buf) < 0) {
+        close(fd);
+        return;
+    }
+
+    memcpy(policy.master_key_identifier,
+           arg->key_spec.u.identifier,
+           sizeof(policy.master_key_identifier));
+
+    if (ioctl(fd, FS_IOC_SET_ENCRYPTION_POLICY, &policy) < 0) {
+        memcpy(remove.key_spec.u.identifier,
+               arg->key_spec.u.identifier,
+               sizeof(remove.key_spec.u.identifier));
+        ioctl(fd, FS_IOC_REMOVE_ENCRYPTION_KEY, &remove);
+    }
+
+    close(fd);
+}
+
+#endif
+
 int main(int argc, char *argv[])
 {
     static const char *dirs[] = {
-        "/save",
 #ifndef HAVE_AUFS
         "/.work",
 #endif
@@ -143,7 +228,7 @@ int main(int argc, char *argv[])
     };
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
-    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/save/.sfs0")] = "/save/.sfs", *tmp;
+    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/save/.sfs0")] = "/save/.sfs";
     const char *loop;
     size_t len, brlen = sizeof(FSOPTS_HEAD) - 1;
     ssize_t out;
@@ -157,7 +242,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
 
     // clear firmware and bootloader output on the screen
-    write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY - 1));
+    write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY) - 1);
 
     mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, NULL);
 
@@ -200,21 +285,38 @@ int main(int argc, char *argv[])
     if (!sfs[0])
         return EXIT_FAILURE;
 
+    if (mkdir("/save", 0755) < 0) {
+        switch (errno) {
+        case EEXIST:
+            break;
+
+        case EROFS:
+            // we need some writable file system as the upper layer, so we mount
+            // a tmpfs; we assume that /save and /.work already exist if we're
+            // booting from optical media or from a corrupt file system mounted
+            // read-only, and we assume that only the first mkdir() can return
+            // EROFS
+            if (mount("save", "/save", "tmpfs", 0, NULL) < 0)
+                return EXIT_FAILURE;
+
+            ro = 1;
+
+            break;
+
+        default:
+            return EXIT_FAILURE;
+        }
+    }
+
+    // TODO: figure out a way to make encryption work with overlayfs
+#ifdef HAVE_FSCRYPT
+    if (!ro)
+        fscrypt("/save");
+#endif
+
     for (i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
-        if ((mkdir(dirs[i], 0755) == 0) || (errno == EEXIST))
-            continue;
-
-        if ((errno != EROFS) || ro)
+        if ((mkdir(dirs[i], 0755) < 0) && (errno != EEXIST))
             return EXIT_FAILURE;
-
-        // we need some writable file system as the upper layer, so we mount
-        // a tmpfs; we assume that /save and /.work already exist if we're
-        // booting from optical media or from a corrupt file system mounted
-        // read-only, and we assume that only the first mkdir() can return EROFS
-        if (mount("save", "/save", "tmpfs", 0, NULL) < 0)
-            return EXIT_FAILURE;
-
-        ro = 1;
     }
 
     // mount a devtmpfs so we have the loop%d device nodes
