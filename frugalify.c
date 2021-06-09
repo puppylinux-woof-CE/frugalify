@@ -11,6 +11,10 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/mount.h>
+#include <signal.h>
+#include <pwd.h>
+#include <sys/wait.h>
+#include <sys/reboot.h>
 
 #ifdef HAVE_FSCRYPT
 #   include <linux/fscrypt.h>
@@ -42,6 +46,150 @@ static inline void do_autoclose(void *fdp)
 }
 
 #define autoclose __attribute__((cleanup(do_autoclose)))
+
+static void fakelogin(void)
+{
+    struct passwd *user;
+
+    user = getpwuid(geteuid());
+
+    if (!user ||
+        (setenv("USER", user->pw_name, 1) < 0) ||
+        (setenv("HOME", user->pw_dir, 1) < 0) ||
+        (setenv("SHELL", user->pw_shell, 1) < 0) ||
+        (chdir(user->pw_dir) < 0))
+        return;
+
+    execlp(user->pw_shell, user->pw_shell, "-l", (char *)NULL);
+}
+
+static void do_cttyhack(void)
+{
+    autoclose int fd = -1;
+
+    if (setsid() < 0)
+        return;
+
+    fd = open("/dev/console", O_RDWR);
+    if ((fd < 0) ||
+        (ioctl(fd, TIOCSCTTY, NULL) < 0) ||
+        (dup2(fd, STDIN_FILENO) < 0) ||
+        (dup2(fd, STDOUT_FILENO) < 0) ||
+        (dup2(fd, STDERR_FILENO) < 0))
+        return;
+
+    close(fd);
+    fd = -1;
+
+    fakelogin();
+}
+
+static pid_t cttyhack(void)
+{
+    pid_t pid;
+    sigset_t mask;
+
+    pid = fork();
+    if (pid == 0) {
+        if ((sigfillset(&mask) < 0) ||
+            (sigprocmask(SIG_UNBLOCK, &mask, NULL) < 0))
+            exit(EXIT_FAILURE);
+
+        do_cttyhack();
+        exit(EXIT_FAILURE);
+    }
+
+    return pid;
+}
+
+static int initscript(void)
+{
+    pid_t pid;
+    sigset_t mask;
+    int status;
+
+    pid = fork();
+    if (pid == 0) {
+        if ((sigfillset(&mask) < 0) ||
+            (sigprocmask(SIG_UNBLOCK, &mask, NULL) < 0))
+            exit(EXIT_FAILURE);
+
+        execl("/etc/rc.d/rc.sysinit", "/etc/rc.d/rc.sysinit", (char *)NULL);
+        exit(EXIT_FAILURE);
+    }
+    else if ((pid < 0) ||
+             (waitpid(pid, &status, 0) != pid) ||
+             !WIFEXITED(status))
+        return -1;
+
+    return 0;
+}
+
+static int init(void)
+{
+    sigset_t mask;
+    pid_t pid, reaped;
+    siginfo_t sig = {.si_signo = SIGUSR2};
+    int status, ret;
+
+    /* block SIGCHLD, SIGTERM (poweroff) and SIGUSR2 (reboot) */
+    if ((sigfillset(&mask) < 0) ||
+        (sigaddset(&mask, SIGCHLD) < 0) ||
+        (sigaddset(&mask, SIGTERM) < 0) ||
+        (sigaddset(&mask, SIGUSR2) < 0) ||
+        (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
+        goto shutdown;
+
+    if (initscript() < 0)
+        goto shutdown;
+
+    write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY) - 1);
+
+    /* run a login shell */
+    pid = cttyhack();
+    if (pid < 0)
+        goto shutdown;
+
+    do {
+        if ((sigwaitinfo(&mask, &sig) < 0) || (sig.si_signo != SIGCHLD))
+            break;
+
+        reaped = waitpid(sig.si_pid, &status, WNOHANG);
+        if (reaped < 0) {
+            if (errno != ECHILD)
+                break;
+            continue;
+        }
+        else if (reaped == 0)
+            continue;
+
+        if (!WIFEXITED(status) && !WIFSIGNALED(status))
+            continue;
+
+        if (sig.si_pid == pid) {
+            pid = cttyhack();
+            if (pid < 0)
+                goto shutdown;
+        }
+    } while (1);
+
+shutdown:
+    ret = kill(-1, SIGTERM);
+    sleep(2);
+    if (ret == 0)
+        kill(-1, SIGKILL);
+
+    sync();
+
+    if (vfork() == 0) {
+        if (sig.si_signo == SIGUSR2)
+            reboot(RB_POWER_OFF);
+        else
+            reboot(RB_AUTOBOOT);
+    }
+
+    return EXIT_FAILURE;
+}
 
 // use of sprintf() can double the executable size
 static char *itoa(char *s, int i)
@@ -395,7 +543,5 @@ cpy:
         return EXIT_FAILURE;
 
     // run the real init under the new root file system
-    execl("/sbin/init", "init", "initrd_full_install", NULL);
-
-    return EXIT_FAILURE;
+    return init();
 }

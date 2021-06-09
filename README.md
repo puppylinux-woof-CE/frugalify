@@ -37,7 +37,7 @@ frugalify simulates what the Puppy initramfs does:
 1. It looks for a squashfs image on the partition mounted by the kernel.
 2. It creates the */save* directory on the partition.
 3. It mounts a union file system.
-4. It starts the Puppy init process under the union file system.
+4. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
 
 The result is an initramfs-less Puppy installation that combines the advantages of both installation methods:
 1. The operating system is small, because it's compressed.
