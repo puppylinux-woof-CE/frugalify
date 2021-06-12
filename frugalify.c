@@ -133,7 +133,7 @@ static int init(void)
     int status, ret;
 
     /* block SIGCHLD, SIGTERM (poweroff) and SIGUSR2 (reboot) */
-    if ((sigfillset(&mask) < 0) ||
+    if ((sigemptyset(&mask) < 0) ||
         (sigaddset(&mask, SIGCHLD) < 0) ||
         (sigaddset(&mask, SIGTERM) < 0) ||
         (sigaddset(&mask, SIGUSR2) < 0) ||
