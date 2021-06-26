@@ -373,6 +373,8 @@ int main(int argc, char *argv[])
         "/save/.pup_new",
         "/save/dev",
         "/save/initrd",
+        "/save/.pup_new/mnt",
+        "/save/.pup_new/mnt/home",
     };
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
@@ -524,6 +526,11 @@ cpy:
     // give processes running with the union file system as / a directory
     // outside of the union file system that can be used to add aufs branches
     if (mount("/", "/save/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
+        return EXIT_FAILURE;
+
+    // also give access to the boot partition via /mnt/home, for compatibility
+    // with Puppy tools that assume its presence
+    if (mount("/", "/save/.pup_new/mnt/home", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
 
     if (chdir("/save/.pup_new") < 0)
