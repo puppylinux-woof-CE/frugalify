@@ -373,8 +373,8 @@ int main(int argc, char *argv[])
         "/save/.pup_new",
         "/save/dev",
         "/save/initrd",
-        "/save/.pup_new/mnt",
-        "/save/.pup_new/mnt/home",
+        "/save/mnt",
+        "/save/mnt/home",
     };
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
