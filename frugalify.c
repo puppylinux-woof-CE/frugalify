@@ -43,8 +43,8 @@
 
 static inline void do_autoclose(void *fdp)
 {
-	if (*(int *)fdp != -1)
-		close(*(int *)fdp);
+    if (*(int *)fdp != -1)
+        close(*(int *)fdp);
 }
 
 #define autoclose __attribute__((cleanup(do_autoclose)))
@@ -433,9 +433,9 @@ static void do_pfixram(char **sfs, const int nsfs)
 static void pfixram(char **sfs, const int nsfs)
 {
     if (fork() == 0) {
-		do_pfixram(sfs, nsfs);
-		exit(EXIT_FAILURE);
-	}
+        do_pfixram(sfs, nsfs);
+        exit(EXIT_FAILURE);
+    }
 }
 
 static int memexec(char *argv[])
