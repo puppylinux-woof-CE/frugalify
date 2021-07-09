@@ -15,6 +15,8 @@
 #include <pwd.h>
 #include <sys/wait.h>
 #include <sys/reboot.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
 
 #ifdef HAVE_FSCRYPT
 #   include <linux/fscrypt.h>
@@ -216,7 +218,7 @@ static const char *losetup(const char *sfs, const int i)
     struct stat stbuf;
     struct loop_info64 info = {.lo_flags = LO_FLAGS_READ_ONLY};
     const char *loop;
-    autoclose int loopfd = -1, sfsfd;
+    autoclose int loopfd = -1, sfsfd = -1;
     
     sfsfd = open(sfs, O_RDWR);
     if (sfsfd < 0)
@@ -364,6 +366,78 @@ static void fscrypt(const char *path)
 
 #endif
 
+static void do_pfixram(char **sfs, const int nsfs)
+{
+    struct stat stbuf;
+    sigset_t mask;
+    void *p;
+    long minsize;
+    int fd, sig, i, locked = 0;
+
+    if (prctl(PR_SET_NAME, "pfixram") < 0)
+        return;
+
+    if ((sigemptyset(&mask) < 0) ||
+        (sigaddset(&mask, SIGTERM) < 0) ||
+        (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
+        return;
+
+    minsize = sysconf(_SC_PAGESIZE);
+    if (minsize <= 0)
+        return;
+
+    for (i = nsfs -1; i >= 0; --i) {
+        fd = open(sfs[i], O_RDONLY);
+        if (fd < 0)
+            continue;
+
+        if ((fstat(fd, &stbuf) < 0) || (stbuf.st_size < minsize)) {
+            close(fd);
+            continue;
+        }
+
+        p = mmap(NULL,
+                (size_t)stbuf.st_size,
+                PROT_READ,
+                MAP_PRIVATE | MAP_POPULATE,
+                fd,
+                0);
+        if (p == MAP_FAILED) {
+            if (errno == ENOMEM)
+                return;
+
+            close(fd);
+            continue;
+        }
+
+        if (mlock2(p, (size_t)stbuf.st_size, MLOCK_ONFAULT) < 0) {
+            if (errno == ENOMEM)
+                return;
+
+            munmap(p, (size_t)stbuf.st_size);
+            close(fd);
+            continue;
+        }
+
+        ++locked;
+    }
+
+    if (locked > 0) {
+        while (1) {
+            if ((sigwait(&mask, &sig) < 0) || (sig == SIGTERM))
+                break;
+        }
+    }
+}
+
+static void pfixram(char **sfs, const int nsfs)
+{
+    if (fork() == 0) {
+		do_pfixram(sfs, nsfs);
+		exit(EXIT_FAILURE);
+	}
+}
+
 int main(int argc, char *argv[])
 {
     static const char *dirs[] = {
@@ -384,8 +458,7 @@ int main(int argc, char *argv[])
     ssize_t out;
     DIR *root;
     struct dirent *pent;
-    unsigned int nsfs = 0, i;
-    int ro = 0;
+    int nsfs = 0, i, ro = 0;
 
     // protect against accidental click
     if (getpid() != 1)
@@ -476,7 +549,9 @@ int main(int argc, char *argv[])
     // make sure adrv, zdrv, etc' come after the main SFS
     qsort(sfs, (size_t)nsfs, sizeof(sfs[0]), sfscmp);
 
-    for (i = 0; (i < nsfs) && (brlen < sizeof(br)); ++i) {
+    pfixram(sfs, nsfs);
+
+    for (i = nsfs -1; i >= 0; --i) {
         itoa(sfsmnt + sizeof("/save/.sfs") - 1, i);
 
         if ((mkdir(sfsmnt, 0755) < 0) && (errno != EEXIST))
@@ -495,6 +570,10 @@ int main(int argc, char *argv[])
             rmdir(sfsmnt);
             continue;
         }
+    }
+
+    for (i = 0; (i < nsfs) && (brlen < sizeof(br)); ++i) {
+        itoa(sfsmnt + sizeof("/save/.sfs") - 1, i);
 
 #ifndef HAVE_AUFS
         if (i == 0)

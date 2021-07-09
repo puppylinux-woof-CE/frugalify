@@ -21,6 +21,7 @@ Generally, the full installation type is reserved to cases where frugal installa
 1. It takes less space: the squashfs image containing the operating system is compressed.
 2. It's easier to install, update, inspect and repair: the operating system itself is just the kernel, the initramfs and a squashfs image; the savefile can be deleted to repair or reset the operating system, and backup is a matter of copying the savefile.
 3. It makes it possible to install multiple operating systems (say, different variants of Puppy) on the same partition.
+4. Applications start faster and the operating system feels more responsive, because the smaller, compressed form of applications is faster to read from the disk, or because it's much faster to read from RAM and `pfix=ram` is enabled.
 
 However, inability to perform a frugal installation is not a purely theoretical problem:
 1. Some non-x86 devices have boot loaders that don't support initramfs boot.
@@ -34,16 +35,18 @@ However, inability to perform a frugal installation is not a purely theoretical 
 frugalify is a small, static executable that can be placed on a bootable partition and configured to act as PID 1 via the *init=* kernel parameter.
 
 frugalify simulates what the Puppy initramfs does:
-1. It looks for a squashfs image on the partition mounted by the kernel.
-2. It creates the */save* directory on the partition.
-3. It mounts a union file system.
-4. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
+1. It looks for squashfs images on the partition mounted by the kernel.
+2. It locks the image contents into RAM, to achieve the same effect as `pfix=ram`.
+3. It creates the */save* directory on the partition.
+4. It mounts a union file system.
+5. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
 
 The result is an initramfs-less Puppy installation that combines the advantages of both installation methods:
 1. The operating system is small, because it's compressed.
-2. Updates, repair, etc' are easy, because the operating system is the kernel, the frugalify executable and a squashfs image.
-3. Persistent storage is implemented using a disk partition, and the user does not have to reserve space for it, or think about available free space (i.e. empty the browser cache) all the time.
-4. It's portable: if the kernel can mount the partition, a semi-frugal installation using frugalify is possible.
+2. Applications start quickly, because they are already in RAM.
+3. Updates, repair, etc' are easy, because the operating system is the kernel, the frugalify executable and a squashfs image.
+4. Persistent storage is implemented using a disk partition, and the user does not have to reserve space for it, or think about available free space (i.e. empty the browser cache) all the time.
+5. It's portable: if the kernel can mount the partition, a semi-frugal installation using frugalify is possible.
 
 ## Union File Systems
 
