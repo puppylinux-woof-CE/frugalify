@@ -25,20 +25,20 @@ jobs:
       - name: ARM Build
         run: |
           . /opt/x-tools/arm-any32-linux-musleabi/activate
-          arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-arm
+          arm-any32-linux-musleabi-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-arm
           arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-aufs-arm
-          arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS -DHAVE_FSCRYPT -I. -Imbedtls/include -DMBEDTLS_SHA512_C -DMBEDTLS_CONFIG_FILE=\"/dev/null\" frugalify.c mbedtls/library/sha512.c $LDFLAGS -o frugalify-aufs-fscrypt-arm
+          arm-any32-linux-musleabi-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY -DHAVE_AUFS -DHAVE_FSCRYPT -I. -Imbedtls/include -DMBEDTLS_SHA512_C -DMBEDTLS_CONFIG_FILE=\"/dev/null\" frugalify.c mbedtls/library/sha512.c $LDFLAGS -o frugalify-aufs-fscrypt-arm
           arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-aufs-fscrypt-arm
-          arm-any32-linux-musleabi-cc $CFLAGS -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-arm
+          arm-any32-linux-musleabi-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-arm
           arm-any32-linux-musleabi-strip -s -R .note -R .comment frugalify-overlayfs-arm
       - name: x86 Build
         run: |
           . /opt/x-tools/i386-any32-linux-musl/activate
-          i386-any32-linux-musl-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-i386
+          i386-any32-linux-musl-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-i386
           i386-any32-linux-musl-strip -s -R .note -R .comment frugalify-aufs-i386
-          i386-any32-linux-musl-cc $CFLAGS -DHAVE_STRLCPY -DHAVE_AUFS -DHAVE_FSCRYPT -I. -Imbedtls/include -DMBEDTLS_SHA512_C -DMBEDTLS_CONFIG_FILE=\"/dev/null\" frugalify.c mbedtls/library/sha512.c $LDFLAGS -o frugalify-aufs-fscrypt-i386
+          i386-any32-linux-musl-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY -DHAVE_AUFS -DHAVE_FSCRYPT -I. -Imbedtls/include -DMBEDTLS_SHA512_C -DMBEDTLS_CONFIG_FILE=\"/dev/null\" frugalify.c mbedtls/library/sha512.c $LDFLAGS -o frugalify-aufs-fscrypt-i386
           i386-any32-linux-musl-strip -s -R .note -R .comment frugalify-aufs-fscrypt-i386
-          i386-any32-linux-musl-cc $CFLAGS -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-i386
+          i386-any32-linux-musl-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-i386
           i386-any32-linux-musl-strip -s -R .note -R .comment frugalify-overlayfs-i386
       - name: Create Release
         id: create_release
