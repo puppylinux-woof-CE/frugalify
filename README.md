@@ -35,11 +35,12 @@ However, inability to perform a frugal installation is not a purely theoretical 
 frugalify is a small, static executable that can be placed on a bootable partition and configured to act as PID 1 via the *init=* kernel parameter.
 
 frugalify simulates what the Puppy initramfs does:
-1. It looks for squashfs images on the partition mounted by the kernel.
-2. It locks the image contents into RAM, to achieve the same effect as `pfix=ram`.
-3. It creates the */save* directory on the partition.
-4. It mounts a union file system.
-5. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
+1. It re-runs itself from RAM, so the frugalify executable on disk can be replaced (for example, with a later version).
+2. It looks for squashfs images on the partition mounted by the kernel.
+3. It locks the image contents into RAM, to achieve the same effect as `pfix=ram`.
+4. It creates the */save* directory on the partition.
+5. It mounts a union file system.
+6. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
 
 The result is an initramfs-less Puppy installation that combines the advantages of both installation methods:
 1. The operating system is small, because it's compressed.
