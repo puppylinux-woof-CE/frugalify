@@ -438,6 +438,58 @@ static void pfixram(char **sfs, const int nsfs)
 	}
 }
 
+static int memexec(char *argv[])
+{
+    struct stat stbuf;
+    off_t total = 0;
+    ssize_t out;
+    void *p;
+    autoclose int memfd = -1, self = -1;
+
+    if (getenv("MEMEXEC"))
+        return unsetenv("MEMEXEC");
+
+    if (setenv("MEMEXEC", "1", 1) < 0)
+        return -1;
+
+    memfd = memfd_create(argv[0], 0);
+    if (memfd < 0)
+        return -1;
+
+    if (fcntl(memfd, F_SETFD, FD_CLOEXEC) < 0)
+        return -1;
+
+    self = open("/init", O_RDONLY);
+    if (self < 0)
+        return -1;
+
+    if ((fstat(self, &stbuf) < 0) || (stbuf.st_size == 0))
+        return -1;
+
+    p = mmap(NULL,
+             (size_t)stbuf.st_size,
+             PROT_READ,
+             MAP_PRIVATE,
+             self,
+             0);
+    if (p == MAP_FAILED)
+        return -1;
+
+    do {
+        out = write(memfd, (unsigned char *)p + total, stbuf.st_size - total);
+        if (out <= 0)
+            return -1;
+
+        total += (off_t)out;
+    } while (total < stbuf.st_size);
+
+    munmap(p, (size_t)stbuf.st_size);
+    close(self);
+    self = -1;
+
+    return fexecve(memfd, argv, environ);
+}
+
 int main(int argc, char *argv[])
 {
     static const char *dirs[] = {
@@ -462,6 +514,11 @@ int main(int argc, char *argv[])
 
     // protect against accidental click
     if (getpid() != 1)
+        return EXIT_FAILURE;
+
+    // re-run the executable from RAM, so it can be updated on disk while
+    // running
+    if (memexec(argv) < 0)
         return EXIT_FAILURE;
 
     // clear firmware and bootloader output on the screen
