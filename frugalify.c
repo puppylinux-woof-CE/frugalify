@@ -370,6 +370,7 @@ static void do_pfixram(char **sfs, const int nsfs)
 {
     struct stat stbuf;
     sigset_t mask;
+    const char *base;
     void *p;
     long minsize;
     int fd, sig, i, locked = 0;
@@ -387,6 +388,19 @@ static void do_pfixram(char **sfs, const int nsfs)
         return;
 
     for (i = nsfs -1; i >= 0; --i) {
+        base = strrchr(sfs[i], '/');
+        if (base)
+            ++base;
+        else
+            base = sfs[i];
+
+        if ((strncmp(base, "zdrv_", sizeof("zdrv_") - 1) == 0) ||
+            (strncmp(base, "fdrv_", sizeof("fdrv_") - 1) == 0) ||
+            (strncmp(base, "devx_", sizeof("devx_") - 1) == 0) ||
+            (strncmp(base, "docx_", sizeof("docx_") - 1) == 0) ||
+            (strncmp(base, "nlsx_", sizeof("nlsx_") - 1) == 0))
+            continue;
+
         fd = open(sfs[i], O_RDONLY);
         if (fd < 0)
             continue;
