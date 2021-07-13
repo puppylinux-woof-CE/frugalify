@@ -17,6 +17,7 @@
 #include <sys/reboot.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
+#include <sys/statvfs.h>
 
 #ifdef HAVE_FSCRYPT
 #   include <linux/fscrypt.h>
@@ -31,10 +32,10 @@
 
 #ifdef HAVE_AUFS
 #   define FS "aufs"
-#   define FSOPTS_HEAD "br=/save"
+#   define FSOPTS_HEAD "br=/upper/save"
 #else
 #   define FS "overlay"
-#   define FSOPTS_HEAD "upperdir=/save,workdir=/.work,lowerdir="
+#   define FSOPTS_HEAD "upperdir=/upper/save,workdir=/upper/work,lowerdir="
 #endif
 
 #define CLEAR_TTY "\033[2J\033[H"
@@ -207,9 +208,9 @@ static char *itoa(char *s, int i)
 
 static char *get_lo_path(const int i)
 {
-    static char loop[sizeof("/save/dev/loop0")] = "/save/dev/loop";
+    static char loop[sizeof("/upper/save/dev/loop0")] = "/upper/save/dev/loop";
 
-    itoa(loop + sizeof("/save/dev/loop") - 1, i);
+    itoa(loop + sizeof("/upper/save/dev/loop") - 1, i);
     return loop;
 }
 
@@ -219,8 +220,8 @@ static const char *losetup(const char *sfs, const int i)
     struct loop_info64 info = {.lo_flags = LO_FLAGS_READ_ONLY};
     const char *loop;
     autoclose int loopfd = -1, sfsfd = -1;
-    
-    sfsfd = open(sfs, O_RDWR);
+
+    sfsfd = open(sfs, O_RDONLY);
     if (sfsfd < 0)
         return NULL;
 
@@ -229,7 +230,7 @@ static const char *losetup(const char *sfs, const int i)
 
     loop = get_lo_path(i);
 
-    loopfd = open(loop, O_RDWR);
+    loopfd = open(loop, O_RDONLY);
     if (loopfd < 0)
         return NULL;
 
@@ -243,6 +244,7 @@ static const char *losetup(const char *sfs, const int i)
     info.lo_file_name[sizeof(info.lo_file_name) - 1] = '\0';
 #endif
     info.lo_sizelimit = (uint64_t)stbuf.st_size;
+    info.lo_flags = LO_FLAGS_READ_ONLY;
     if (ioctl(loopfd, LOOP_SET_STATUS64, &info) < 0)
         return NULL;
 
@@ -293,7 +295,6 @@ static unsigned int read_key(unsigned char key[FSCRYPT_MAX_KEY_SIZE])
 {
     unsigned char buf[32];
     unsigned int len;
-    ssize_t out;
 
     for (len = 0; len < sizeof(buf); ++len) {
         if (read(STDIN_FILENO, &buf[len], sizeof(buf[len]) ) != sizeof(buf[len]))
@@ -507,18 +508,20 @@ static int memexec(char *argv[])
 int main(int argc, char *argv[])
 {
     static const char *dirs[] = {
+        "/upper/save",
 #ifndef HAVE_AUFS
-        "/.work",
+        "/upper/work",
 #endif
-        "/save/.pup_new",
-        "/save/dev",
-        "/save/initrd",
-        "/save/mnt",
-        "/save/mnt/home",
+        "/upper/save/.pup_new",
+        "/upper/save/dev",
+        "/upper/save/initrd",
+        "/upper/save/mnt",
+        "/upper/save/mnt/home",
     };
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
-    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/save/.sfs0")] = "/save/.sfs";
+    struct statvfs vfs;
+    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/upper/save/.sfs0")] = "/upper/save/.sfs";
     const char *loop;
     size_t len, brlen = sizeof(FSOPTS_HEAD) - 1;
     ssize_t out;
@@ -530,15 +533,21 @@ int main(int argc, char *argv[])
     if (getpid() != 1)
         return EXIT_FAILURE;
 
+    // clear firmware and bootloader output on the screen
+    write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY) - 1);
+
     // re-run the executable from RAM, so it can be updated on disk while
     // running
     if (memexec(argv) < 0)
         return EXIT_FAILURE;
 
-    // clear firmware and bootloader output on the screen
-    write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY) - 1);
+    if (statvfs("/", &vfs) < 0)
+        return EXIT_FAILURE;
 
-    mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, NULL);
+    if (vfs.f_flag & ST_RDONLY)
+        ro = 1;
+    else
+        mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, NULL);
 
     root = opendir("/");
     if (!root)
@@ -579,34 +588,17 @@ int main(int argc, char *argv[])
     if (!sfs[0])
         return EXIT_FAILURE;
 
-    if (mkdir("/save", 0755) < 0) {
-        switch (errno) {
-        case EEXIST:
-            break;
-
-        case EROFS:
-            // we need some writable file system as the upper layer, so we mount
-            // a tmpfs; we assume that /save and /.work already exist if we're
-            // booting from optical media or from a corrupt file system mounted
-            // read-only, and we assume that only the first mkdir() can return
-            // EROFS
-            if (mount("save", "/save", "tmpfs", 0, NULL) < 0)
-                return EXIT_FAILURE;
-
-            ro = 1;
-
-            break;
-
-        default:
+    if (ro && (mount("save", "/upper", "tmpfs", 0, "size=75%") < 0))
+        return EXIT_FAILURE;
+    else if (!ro) {
+        if ((mkdir("/upper", 0755) < 0) && (errno != EEXIST))
             return EXIT_FAILURE;
-        }
-    }
 
     // TODO: figure out a way to make encryption work with overlayfs
 #ifdef HAVE_FSCRYPT
-    if (!ro)
-        fscrypt("/save");
+        fscrypt("/upper");
 #endif
+    }
 
     for (i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
         if ((mkdir(dirs[i], 0755) < 0) && (errno != EEXIST))
@@ -614,16 +606,16 @@ int main(int argc, char *argv[])
     }
 
     // mount a devtmpfs so we have the loop%d device nodes
-    if (mount("dev", "/save/dev", "devtmpfs", 0, NULL) < 0)
+    if (mount("dev", "/upper/save/dev", "devtmpfs", 0, NULL) < 0)
         return EXIT_FAILURE;
-    
+
     // make sure adrv, zdrv, etc' come after the main SFS
     qsort(sfs, (size_t)nsfs, sizeof(sfs[0]), sfscmp);
 
     pfixram(sfs, nsfs);
 
     for (i = nsfs -1; i >= 0; --i) {
-        itoa(sfsmnt + sizeof("/save/.sfs") - 1, i);
+        itoa(sfsmnt + sizeof("/upper/save/.sfs") - 1, i);
 
         if ((mkdir(sfsmnt, 0755) < 0) && (errno != EEXIST))
             continue;
@@ -636,7 +628,7 @@ int main(int argc, char *argv[])
         }
 
         // mount the loop device
-        if (mount(loop, sfsmnt, "squashfs", 0, NULL) < 0) {
+        if (mount(loop, sfsmnt, "squashfs", MS_RDONLY, "") < 0) {
             losetup_d(i);
             rmdir(sfsmnt);
             continue;
@@ -644,7 +636,7 @@ int main(int argc, char *argv[])
     }
 
     for (i = 0; (i < nsfs) && (brlen < sizeof(br)); ++i) {
-        itoa(sfsmnt + sizeof("/save/.sfs") - 1, i);
+        itoa(sfsmnt + sizeof("/upper/save/.sfs") - 1, i);
 
 #ifndef HAVE_AUFS
         if (i == 0)
@@ -654,36 +646,33 @@ int main(int argc, char *argv[])
         br[brlen] = ':';
         ++brlen;
 
+#ifndef HAVE_AUFS
 cpy:
-        memcpy(&br[brlen], sfsmnt, sizeof("/save/.sfs0") - 1);
-        brlen += sizeof("/save/.sfs0") - 1;
+#endif
+        memcpy(&br[brlen], sfsmnt, sizeof("/upper/save/.sfs0") - 1);
+        brlen += sizeof("/upper/save/.sfs0") - 1;
     }
     br[brlen] = '\0';
     
     // we no longer need /dev
-    umount2("/save/dev", MNT_DETACH);
-    rmdir("/save/dev");
+    umount2("/upper/save/dev", MNT_DETACH);
+    rmdir("/upper/save/dev");
 
-#ifndef HAVE_AUFS
-    if (ro && mount("work", "/.work", "tmpfs", 0, NULL) < 0)
-        return EXIT_FAILURE;
-#endif
-
-    // mount a union file system with the SFS mount points and /save on top
-    if (mount(FS, "/save/.pup_new", FS, MS_NOATIME, br) < 0)
+    // mount a union file system with the SFS mount points and /upper/save on top
+    if (mount(FS, "/upper/save/.pup_new", FS, MS_NOATIME, br) < 0)
         return EXIT_FAILURE;
     
     // give processes running with the union file system as / a directory
     // outside of the union file system that can be used to add aufs branches
-    if (mount("/", "/save/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
+    if (mount("/", "/upper/save/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
 
     // also give access to the boot partition via /mnt/home, for compatibility
     // with Puppy tools that assume its presence
-    if (mount("/", "/save/.pup_new/mnt/home", NULL, MS_BIND, NULL) < 0)
+    if (mount("/", "/upper/save/.pup_new/mnt/home", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
 
-    if (chdir("/save/.pup_new") < 0)
+    if (chdir("/upper/save/.pup_new") < 0)
         return EXIT_FAILURE;
 
     // make the union file system the the file system root, or the file system

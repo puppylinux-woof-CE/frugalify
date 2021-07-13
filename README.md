@@ -38,8 +38,8 @@ frugalify simulates what the Puppy initramfs does:
 1. It re-runs itself from RAM, so the frugalify executable on disk can be replaced (for example, with a later version).
 2. It looks for squashfs images on the partition mounted by the kernel.
 3. It locks the image contents into RAM, to achieve the same effect as `pfix=ram`.
-4. It creates the */save* directory on the partition.
-5. It mounts a union file system.
+4. It creates the */upper* directory on the partition, or mounts a `tmpfs` on it if / is read-only.
+5. It mounts a union file system, with */upper/save* as the upper layer.
 6. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
 
 The result is an initramfs-less Puppy installation that combines the advantages of both installation methods:
@@ -57,7 +57,7 @@ frugalify supports:
 
 ## Encryption
 
-The [aufs](http://aufs.sourceforge.net/) variant of frugalify supports encryption of the */save* directory using [file system level encryption](https://www.kernel.org/doc/html/latest/filesystems/fscrypt.html).
+The [aufs](http://aufs.sourceforge.net/) variant of frugalify supports encryption of the */upper* directory using [file system level encryption](https://www.kernel.org/doc/html/latest/filesystems/fscrypt.html).
 
 In every boot, the user is required to specify a passphrase. frugalify computes its SHA512 using [mbedtls](https://tls.mbed.org) to generate a 64-byte encryption key.
 
