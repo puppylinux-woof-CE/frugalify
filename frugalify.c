@@ -35,7 +35,7 @@
 #   define FSOPTS_HEAD "br=/upper/save"
 #else
 #   define FS "overlay"
-#   define FSOPTS_HEAD "upperdir=/upper/save,workdir=/upper/work,lowerdir="
+#   define FSOPTS_HEAD "upperdir=/upper/save,workdir=/upper/.work,lowerdir="
 #endif
 
 #define CLEAR_TTY "\033[2J\033[H"
@@ -510,9 +510,9 @@ int main(int argc, char *argv[])
     static const char *dirs[] = {
         "/upper/save",
 #ifndef HAVE_AUFS
-        "/upper/work",
+        "/upper/.work",
 #endif
-        "/upper/save/.pup_new",
+        "/upper/.pup_new",
         "/upper/save/dev",
         "/upper/save/initrd",
         "/upper/save/mnt",
@@ -521,7 +521,7 @@ int main(int argc, char *argv[])
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
     struct statvfs vfs;
-    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/upper/save/.sfs0")] = "/upper/save/.sfs";
+    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/upper/.sfs0")] = "/upper/.sfs";
     const char *loop;
     size_t len, brlen = sizeof(FSOPTS_HEAD) - 1;
     ssize_t out;
@@ -615,7 +615,7 @@ int main(int argc, char *argv[])
     pfixram(sfs, nsfs);
 
     for (i = nsfs -1; i >= 0; --i) {
-        itoa(sfsmnt + sizeof("/upper/save/.sfs") - 1, i);
+        itoa(sfsmnt + sizeof("/upper/.sfs") - 1, i);
 
         if ((mkdir(sfsmnt, 0755) < 0) && (errno != EEXIST))
             continue;
@@ -636,7 +636,7 @@ int main(int argc, char *argv[])
     }
 
     for (i = 0; (i < nsfs) && (brlen < sizeof(br)); ++i) {
-        itoa(sfsmnt + sizeof("/upper/save/.sfs") - 1, i);
+        itoa(sfsmnt + sizeof("/upper/.sfs") - 1, i);
 
 #ifndef HAVE_AUFS
         if (i == 0)
@@ -649,8 +649,8 @@ int main(int argc, char *argv[])
 #ifndef HAVE_AUFS
 cpy:
 #endif
-        memcpy(&br[brlen], sfsmnt, sizeof("/upper/save/.sfs0") - 1);
-        brlen += sizeof("/upper/save/.sfs0") - 1;
+        memcpy(&br[brlen], sfsmnt, sizeof("/upper/.sfs0") - 1);
+        brlen += sizeof("/upper/.sfs0") - 1;
     }
     br[brlen] = '\0';
     
@@ -659,20 +659,20 @@ cpy:
     rmdir("/upper/save/dev");
 
     // mount a union file system with the SFS mount points and /upper/save on top
-    if (mount(FS, "/upper/save/.pup_new", FS, MS_NOATIME, br) < 0)
+    if (mount(FS, "/upper/.pup_new", FS, MS_NOATIME, br) < 0)
         return EXIT_FAILURE;
     
     // give processes running with the union file system as / a directory
     // outside of the union file system that can be used to add aufs branches
-    if (mount("/", "/upper/save/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
+    if (mount("/", "/upper/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
 
     // also give access to the boot partition via /mnt/home, for compatibility
     // with Puppy tools that assume its presence
-    if (mount("/", "/upper/save/.pup_new/mnt/home", NULL, MS_BIND, NULL) < 0)
+    if (mount("/", "/upper/.pup_new/mnt/home", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
 
-    if (chdir("/upper/save/.pup_new") < 0)
+    if (chdir("/upper/.pup_new") < 0)
         return EXIT_FAILURE;
 
     // make the union file system the the file system root, or the file system
