@@ -18,10 +18,20 @@ jobs:
           submodules: recursive
       - name: Install Toolchains
         run: |
+          curl -L https://github.com/dimkr/toolchains/releases/latest/download/x86_64-any64-linux-musl.tar.gz | sudo tar -xzf - -C /
           curl -L https://github.com/dimkr/toolchains/releases/latest/download/arm-any32-linux-musleabi.tar.gz | sudo tar -xzf - -C /
           curl -L https://github.com/dimkr/toolchains/releases/latest/download/i386-any32-linux-musl.tar.gz | sudo tar -xzf - -C /
           mkdir -p linux
           curl -o linux/fscrypt.h "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/include/uapi/linux/fscrypt.h?h=linux-5.4.y&id=8f55ad4daf001b6ee8ddf672e14475a35403b258"
+      - name: x86_64 Build
+        run: |
+          . /opt/x-tools/x86_64-any64-linux-musl/activate
+          x86_64-any64-linux-musl-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY -DHAVE_AUFS frugalify.c $LDFLAGS -o frugalify-aufs-x86_64
+          x86_64-any64-linux-musl-strip -s -R .note -R .comment frugalify-aufs-x86_64
+          x86_64-any64-linux-musl-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY -DHAVE_AUFS -DHAVE_FSCRYPT -I. -Imbedtls/include -DMBEDTLS_SHA512_C -DMBEDTLS_CONFIG_FILE=\"/dev/null\" frugalify.c mbedtls/library/sha512.c $LDFLAGS -o frugalify-aufs-fscrypt-x86_64
+          x86_64-any64-linux-musl-strip -s -R .note -R .comment frugalify-aufs-fscrypt-x86_64
+          x86_64-any64-linux-musl-cc $CFLAGS -D_GNU_SOURCE -DHAVE_STRLCPY frugalify.c $LDFLAGS -o frugalify-overlayfs-x86_64
+          x86_64-any64-linux-musl-strip -s -R .note -R .comment frugalify-overlayfs-x86_64
       - name: ARM Build
         run: |
           . /opt/x-tools/arm-any32-linux-musleabi/activate
@@ -51,7 +61,33 @@ jobs:
           draft: false
           prerelease: false
       - name: Upload Release Asset
-        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./frugalify-aufs-x86_64
+          asset_name: frugalify-aufs-x86_64
+          asset_content_type: application/x-executable
+      - name: Upload Release Asset 2
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./frugalify-aufs-fscrypt-x86_64
+          asset_name: frugalify-aufs-fscrypt-x86_64
+          asset_content_type: application/x-executable
+      - name: Upload Release Asset 3
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./frugalify-overlayfs-x86_64
+          asset_name: frugalify-overlayfs-x86_64
+          asset_content_type: application/x-executable
+      - name: Upload Release Asset 4
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,8 +96,7 @@ jobs:
           asset_path: ./frugalify-aufs-arm
           asset_name: frugalify-aufs-arm
           asset_content_type: application/x-executable
-      - name: Upload Release Asset 2
-        id: upload-release-asset-2
+      - name: Upload Release Asset 5
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,8 +105,7 @@ jobs:
           asset_path: ./frugalify-aufs-fscrypt-arm
           asset_name: frugalify-aufs-fscrypt-arm
           asset_content_type: application/x-executable
-      - name: Upload Release Asset 3
-        id: upload-release-asset-3
+      - name: Upload Release Asset 6
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -80,8 +114,7 @@ jobs:
           asset_path: ./frugalify-overlayfs-arm
           asset_name: frugalify-overlayfs-arm
           asset_content_type: application/x-executable
-      - name: Upload Release Asset 4
-        id: upload-release-asset-4
+      - name: Upload Release Asset 7
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -90,8 +123,7 @@ jobs:
           asset_path: ./frugalify-aufs-i386
           asset_name: frugalify-aufs-i386
           asset_content_type: application/x-executable
-      - name: Upload Release Asset 5
-        id: upload-release-asset-5
+      - name: Upload Release Asset 8
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,8 +132,7 @@ jobs:
           asset_path: ./frugalify-aufs-fscrypt-i386
           asset_name: frugalify-aufs-fscrypt-i386
           asset_content_type: application/x-executable
-      - name: Upload Release Asset 6
-        id: upload-release-asset-6
+      - name: Upload Release Asset 9
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
