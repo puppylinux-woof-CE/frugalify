@@ -546,7 +546,8 @@ int main(int argc, char *argv[])
 
     if (vfs.f_flag & ST_RDONLY)
         ro = 1;
-    else
+    else if ((mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, "discard") < 0) &&
+             (errno == EINVAL))
         mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, NULL);
 
     root = opendir("/");
