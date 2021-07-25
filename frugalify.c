@@ -474,7 +474,7 @@ static int memexec(char *argv[])
     if (fcntl(memfd, F_SETFD, FD_CLOEXEC) < 0)
         return -1;
 
-    self = open("/init", O_RDONLY);
+    self = open("/upper/save/proc/self/exe", O_RDONLY);
     if (self < 0)
         return -1;
 
@@ -513,6 +513,7 @@ int main(int argc, char *argv[])
         "/upper/.work",
 #endif
         "/upper/.pup_new",
+        "/upper/save/proc",
         "/upper/save/dev",
         "/upper/save/initrd",
         "/upper/save/mnt",
@@ -535,11 +536,6 @@ int main(int argc, char *argv[])
 
     // clear firmware and bootloader output on the screen
     write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY) - 1);
-
-    // re-run the executable from RAM, so it can be updated on disk while
-    // running
-    if (memexec(argv) < 0)
-        return EXIT_FAILURE;
 
     if (statvfs("/", &vfs) < 0)
         return EXIT_FAILURE;
@@ -605,6 +601,18 @@ int main(int argc, char *argv[])
         if ((mkdir(dirs[i], 0755) < 0) && (errno != EEXIST))
             return EXIT_FAILURE;
     }
+
+    // mount proc so we can read the executable from /proc/self/exe
+    if (mount("proc", "/upper/save/proc", "proc", 0, NULL) < 0)
+        return EXIT_FAILURE;
+
+    // re-run the executable from RAM, so it can be updated on disk while
+    // running
+    if (memexec(argv) < 0)
+        return EXIT_FAILURE;
+
+    umount2("/upper/save/proc", MNT_DETACH);
+    rmdir("/upper/save/proc");
 
     // mount a devtmpfs so we have the loop%d device nodes
     if (mount("dev", "/upper/save/dev", "devtmpfs", 0, NULL) < 0)
