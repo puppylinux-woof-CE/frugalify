@@ -367,6 +367,20 @@ static void fscrypt(const char *path)
 
 #endif
 
+static int oom_score_adj(void)
+{
+    autoclose int adj = -1;
+
+    adj = open("/upper/save/proc/self/oom_score_adj", O_WRONLY);
+    if (adj < 0)
+        return -1;
+
+    if (write(adj, "1000", sizeof("1000") - 1) != sizeof("1000") - 1)
+        return -1;
+
+    return 0;
+}
+
 static void do_pfixram(char **sfs, const int nsfs)
 {
     struct stat stbuf;
@@ -448,6 +462,10 @@ static void do_pfixram(char **sfs, const int nsfs)
 static void pfixram(char **sfs, const int nsfs)
 {
     if (fork() == 0) {
+        // pfixram should be the first process to kill when out of memory
+        if (oom_score_adj() < 0)
+            exit(EXIT_FAILURE);
+
         do_pfixram(sfs, nsfs);
         exit(EXIT_FAILURE);
     }
@@ -611,17 +629,17 @@ int main(int argc, char *argv[])
     if (memexec(argv) < 0)
         return EXIT_FAILURE;
 
+    // make sure adrv, zdrv, etc' come after the main SFS
+    qsort(sfs, (size_t)nsfs, sizeof(sfs[0]), sfscmp);
+
+    pfixram(sfs, nsfs);
+
     umount2("/upper/save/proc", MNT_DETACH);
     rmdir("/upper/save/proc");
 
     // mount a devtmpfs so we have the loop%d device nodes
     if (mount("dev", "/upper/save/dev", "devtmpfs", 0, NULL) < 0)
         return EXIT_FAILURE;
-
-    // make sure adrv, zdrv, etc' come after the main SFS
-    qsort(sfs, (size_t)nsfs, sizeof(sfs[0]), sfscmp);
-
-    pfixram(sfs, nsfs);
 
     for (i = nsfs -1; i >= 0; --i) {
         itoa(sfsmnt + sizeof("/upper/.sfs") - 1, i);
