@@ -480,15 +480,25 @@ static void pfixram(char **sfs, const int nsfs)
 static int memexec(char *argv[])
 {
     struct stat stbuf;
+    char buf[16];
     off_t total = 0;
     ssize_t out;
+    const char *comm;
     void *p;
     autoclose int memfd = -1, self = -1;
 
-    if (getenv("MEMEXEC"))
-        return unsetenv("MEMEXEC");
+    comm = getenv("COMM");
+    if (comm) {
+        if (unsetenv("COMM") < 0)
+            return -1;
 
-    if (setenv("MEMEXEC", "1", 1) < 0)
+        return prctl(PR_SET_NAME, comm);
+    }
+
+    if (prctl(PR_GET_NAME, buf) < 0)
+        return -1;
+
+    if (setenv("COMM", buf, 1) < 0)
         return -1;
 
     memfd = memfd_create(argv[0], 0);
