@@ -18,6 +18,8 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/statvfs.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #ifdef HAVE_FSCRYPT
 #   include <linux/fscrypt.h>
@@ -462,6 +464,10 @@ static void do_pfixram(char **sfs, const int nsfs)
 static void pfixram(char **sfs, const int nsfs)
 {
     if (fork() == 0) {
+        // lower our priority so we don't starve I/O intensive applications
+        if (setpriority(PRIO_PROCESS, 0, 10) < 0)
+            exit(EXIT_FAILURE);
+
         // pfixram should be the first process to kill when out of memory
         if (oom_score_adj() < 0)
             exit(EXIT_FAILURE);
