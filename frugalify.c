@@ -369,11 +369,11 @@ static void fscrypt(const char *path)
 
 #endif
 
-static int oom_score_adj(void)
+static int oom_score_adj(const int proc)
 {
     autoclose int adj = -1;
 
-    adj = open("/upper/save/proc/self/oom_score_adj", O_WRONLY);
+    adj = openat(proc, "self/oom_score_adj", O_WRONLY);
     if (adj < 0)
         return -1;
 
@@ -463,14 +463,23 @@ static void do_pfixram(char **sfs, const int nsfs)
 
 static void pfixram(char **sfs, const int nsfs)
 {
+    autoclose int proc = -1;
+
+    proc = open("/upper/save/proc", O_DIRECTORY);
+    if (proc < 0)
+        return;
+
     if (fork() == 0) {
         // lower our priority so we don't starve I/O intensive applications
         if (setpriority(PRIO_PROCESS, 0, 10) < 0)
             exit(EXIT_FAILURE);
 
         // pfixram should be the first process to kill when out of memory
-        if (oom_score_adj() < 0)
+        if (oom_score_adj(proc) < 0)
             exit(EXIT_FAILURE);
+
+        close(proc);
+        proc = -1;
 
         do_pfixram(sfs, nsfs);
         exit(EXIT_FAILURE);
