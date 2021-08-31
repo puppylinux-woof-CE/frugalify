@@ -21,7 +21,7 @@ Generally, the full installation type is reserved to cases where frugal installa
 1. It takes less space: the squashfs image containing the operating system is compressed.
 2. It's easier to install, update, inspect and repair: the operating system itself is just the kernel, the initramfs and a squashfs image; the savefile can be deleted to repair or reset the operating system, and backup is a matter of copying the savefile.
 3. It makes it possible to install multiple operating systems (say, different variants of Puppy) on the same partition.
-4. Applications start faster and the operating system feels more responsive, because the smaller, compressed form of applications is faster to read from the disk, or because it's much faster to read from RAM and `pfix=ram` is enabled.
+4. Applications start faster and the operating system feels more responsive, because the smaller, compressed form of applications is faster to read from the disk, or because it's much faster to read from RAM and `pfix=copy` is specified.
 
 However, inability to perform a frugal installation is not a purely theoretical problem:
 1. Some non-x86 devices have boot loaders that don't support initramfs boot.
@@ -37,7 +37,7 @@ frugalify is a small, static executable that can be placed on a bootable partiti
 frugalify simulates what the Puppy initramfs does:
 1. It re-runs itself from RAM, so the frugalify executable on disk can be replaced (for example, with a later version).
 2. It looks for squashfs images on the partition mounted by the kernel.
-3. It locks the image contents into RAM, to achieve the same effect as `pfix=ram`.
+3. It locks the image contents into RAM, unless `pfix=nocopy` is specified.
 4. It creates the */upper* directory on the partition, or mounts a `tmpfs` on it if / is read-only.
 5. It mounts a union file system, with */upper/save* as the upper layer.
 6. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
@@ -60,6 +60,14 @@ frugalify supports:
 The [aufs](http://aufs.sourceforge.net/) variant of frugalify supports encryption of the */upper* directory using [file system level encryption](https://www.kernel.org/doc/html/latest/filesystems/fscrypt.html).
 
 In every boot, the user is required to specify a passphrase. frugalify computes its SHA512 using [mbedtls](https://tls.mbed.org) to generate a 64-byte encryption key.
+
+## Boot Options
+
+frugalify supports the following Puppy boot options:
+- `pfix=nocopy`: disables the locking of squashfs image contents to RAM
+- `pfix=ram`: disables persistency
+
+These options should be specified in the kernel command-line.
 
 ## Releases
 

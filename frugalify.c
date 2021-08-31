@@ -44,6 +44,11 @@
 #define HIDE_KEY "\033[32m\033[102m"
 #define RESET_TTY "\033[39m\033[49m"
 
+enum {
+    BOOTCODE_NOCOPY = 1,
+    BOOTCODE_RAM    = 1 << 1,
+};
+
 static inline void do_autoclose(void *fdp)
 {
     if (*(int *)fdp != -1)
@@ -548,6 +553,38 @@ static int memexec(char *argv[])
     return fexecve(memfd, argv, environ);
 }
 
+static int getcodes(unsigned int *bootcodes)
+{
+    static char buf[256];
+    ssize_t len;
+    char *tok, *save;
+    autoclose int cmdline = -1;
+
+    cmdline = open("/upper/cmdline", O_RDONLY);
+    if (cmdline < 0)
+        return -1;
+
+    len = read(cmdline, buf, sizeof(buf));
+    if (len < 0)
+        return -1;
+    else if (len == 0)
+        return 0;
+
+    buf[len - 1] = '\0';
+
+    tok = strtok_r(buf, " ", &save);
+    do {
+        if (strcmp(tok, "pfix=nocopy") == 0)
+            *bootcodes |= BOOTCODE_NOCOPY;
+        else if (strcmp(tok, "pfix=ram") == 0)
+            *bootcodes |= BOOTCODE_RAM;
+
+        tok = strtok_r(NULL, " ", &save);
+    } while (tok);
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     static const char *dirs[] = {
@@ -572,6 +609,7 @@ int main(int argc, char *argv[])
     DIR *root;
     struct dirent *pent;
     int nsfs = 0, i, ro = 0;
+    unsigned int bootcodes = 0;
 
     // protect against accidental click
     if (getpid() != 1)
@@ -628,17 +666,26 @@ int main(int argc, char *argv[])
     if (!sfs[0])
         return EXIT_FAILURE;
 
-    if (ro && (mount("save", "/upper", "tmpfs", 0, "size=75%") < 0))
+    if (!ro && ((mkdir("/upper", 0755) < 0) && (errno != EEXIST)))
         return EXIT_FAILURE;
-    else if (!ro) {
-        if ((mkdir("/upper", 0755) < 0) && (errno != EEXIST))
-            return EXIT_FAILURE;
 
+    // temporarily mount proc at /upper, only to parse cmdline
+    if (mount("proc", "/upper", "proc", 0, NULL) < 0)
+        return EXIT_FAILURE;
+
+    if (getcodes(&bootcodes) < 0)
+        return EXIT_FAILURE;
+
+    umount2("/upper", MNT_DETACH);
+
+    if ((ro || (bootcodes & BOOTCODE_RAM)) && (mount("save", "/upper", "tmpfs", 0, "size=75%") < 0))
+        return EXIT_FAILURE;
     // TODO: figure out a way to make encryption work with overlayfs
 #ifdef HAVE_FSCRYPT
+    else if (!ro && !(bootcodes & BOOTCODE_RAM))
         fscrypt("/upper");
-#endif
     }
+#endif
 
     for (i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
         if ((mkdir(dirs[i], 0755) < 0) && (errno != EEXIST))
@@ -657,7 +704,8 @@ int main(int argc, char *argv[])
     // make sure adrv, zdrv, etc' come after the main SFS
     qsort(sfs, (size_t)nsfs, sizeof(sfs[0]), sfscmp);
 
-    pfixram(sfs, nsfs);
+    if (!(bootcodes & BOOTCODE_NOCOPY))
+        pfixram(sfs, nsfs);
 
     umount2("/upper/save/proc", MNT_DETACH);
     rmdir("/upper/save/proc");
