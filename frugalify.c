@@ -684,7 +684,6 @@ int main(int argc, char *argv[])
 #ifdef HAVE_FSCRYPT
     else if (!ro && !(bootcodes & BOOTCODE_RAM))
         fscrypt("/upper");
-    }
 #endif
 
     for (i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
