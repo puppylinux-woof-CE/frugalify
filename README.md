@@ -38,7 +38,7 @@ frugalify simulates what the Puppy initramfs does:
 1. It re-runs itself from RAM, so the frugalify executable on disk can be replaced (for example, with a later version).
 2. It looks for squashfs images on the partition mounted by the kernel.
 3. It locks the image contents into RAM, unless `pfix=nocopy` is specified.
-4. It creates the */upper* directory on the partition, or mounts a `tmpfs` on it if / is read-only.
+4. It creates the */upper* directory on the partition, or mounts a `tmpfs` when / is read-only or `pfix=ram` is specified.
 5. It mounts a union file system, with */upper/save* as the upper layer.
 6. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
 
