@@ -61,6 +61,10 @@ The [aufs](http://aufs.sourceforge.net/) variant of frugalify supports encryptio
 
 In every boot, the user is required to specify a passphrase. frugalify computes its SHA512 using [mbedtls](https://tls.mbed.org) to generate a 64-byte encryption key.
 
+## TRIM
+
+frugalify spawns a child process, fstrimd, which simulates fstrim(8) once a week.
+
 ## Boot Options
 
 frugalify supports the following Puppy boot options:

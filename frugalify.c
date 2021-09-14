@@ -20,6 +20,10 @@
 #include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
+#include <time.h>
+#include <limits.h>
 
 #ifdef HAVE_FSCRYPT
 #   include <linux/fscrypt.h>
@@ -28,6 +32,16 @@
 
 #ifndef LOOP_CTL_GET_FREE
 #   define LOOP_CTL_GET_FREE 0x4C82
+#endif
+
+#ifndef FITRIM
+#   define FITRIM _IOWR('X', 121, struct fstrim_range)
+
+struct fstrim_range {
+    uint64_t start;
+    uint64_t len;
+    uint64_t minlen;
+};
 #endif
 
 #define MAXSFS 8
@@ -43,6 +57,8 @@
 #define CLEAR_TTY "\033[2J\033[H"
 #define HIDE_KEY "\033[32m\033[102m"
 #define RESET_TTY "\033[39m\033[49m"
+
+#define FSTRIM_FREQ (60 * 60 * 24 * 7)
 
 enum {
     BOOTCODE_NOCOPY = 1,
@@ -585,6 +601,74 @@ static int getcodes(unsigned int *bootcodes)
     return 0;
 }
 
+static void fstrim(const int fd)
+{
+    struct timespec now, prev;
+    struct stat stbuf;
+    struct fstrim_range range = {.len = ULLONG_MAX};
+
+    if (clock_gettime(CLOCK_REALTIME, &now) < 0)
+        return;
+
+    if (now.tv_sec < FSTRIM_FREQ)
+        return;
+
+    prev.tv_sec = now.tv_sec - FSTRIM_FREQ;
+    prev.tv_nsec = now.tv_nsec;
+
+    if (fstat(fd, &stbuf) < 0)
+        return;
+
+    if ((stbuf.st_mtim.tv_sec > prev.tv_sec) ||
+        ((stbuf.st_mtim.tv_sec == prev.tv_sec) &&
+         (stbuf.st_mtim.tv_nsec >= prev.tv_nsec)))
+        return;
+
+    ioctl(fd, FITRIM, &range);
+    futimens(fd, NULL);
+}
+
+static void do_fstrimd(const int fd)
+{
+    siginfo_t sig;
+    struct timespec ts = {.tv_sec = FSTRIM_FREQ + 120};
+    sigset_t mask;
+
+    if (prctl(PR_SET_NAME, "fstrimd") < 0)
+        return;
+
+    if ((sigemptyset(&mask) < 0) ||
+        (sigaddset(&mask, SIGTERM) < 0) ||
+        (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
+        return;
+
+    while (1) {
+        if (sigtimedwait(&mask, &sig, &ts) < 0) {
+            if (errno == EAGAIN)
+                fstrim(fd);
+            else if (errno != EINTR)
+                break;
+        } else if (sig.si_signo == SIGTERM)
+            break;
+    }
+}
+
+static void fstrimd(void)
+{
+    autoclose int fd = -1;
+
+    fd = open("/upper", O_DIRECTORY);
+    if (fd < 0)
+        return;
+
+    fstrim(fd);
+
+    if (fork() == 0) {
+        do_fstrimd(fd);
+        exit(EXIT_FAILURE);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     static const char *dirs[] = {
@@ -623,8 +707,7 @@ int main(int argc, char *argv[])
 
     if (vfs.f_flag & ST_RDONLY)
         ro = 1;
-    else if ((mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, "discard") < 0) &&
-             (errno == EINVAL))
+    else
         mount(NULL, "/", NULL, MS_REMOUNT | MS_NOATIME, NULL);
 
     root = opendir("/");
@@ -705,6 +788,9 @@ int main(int argc, char *argv[])
 
     if (!(bootcodes & BOOTCODE_NOCOPY))
         pfixram(sfs, nsfs);
+
+    if (!ro && !(bootcodes & BOOTCODE_RAM))
+        fstrimd();
 
     umount2("/upper/save/proc", MNT_DETACH);
     rmdir("/upper/save/proc");
