@@ -1028,9 +1028,6 @@ cpy:
     if (chdir("/") < 0)
         return EXIT_FAILURE;
 
-    if (!ro && !(bootcodes & BOOTCODE_RAM))
-        fstrimd();
-
     // syslogd creates /dev/log, so we must mount /dev before starting it
     if (mount("dev", "/dev", "devtmpfs", 0, NULL) < 0)
         return EXIT_FAILURE;
@@ -1042,6 +1039,9 @@ cpy:
 
         klogd();
     }
+
+    if (!ro && !(bootcodes & BOOTCODE_RAM))
+        fstrimd();
 
     // run the real init under the new root file system
     return init();
