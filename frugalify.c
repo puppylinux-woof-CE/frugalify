@@ -686,55 +686,37 @@ static void fstrimd(void)
     }
 }
 
-static void do_syslogd(const int sockfd, const int logfd, const int iosig)
+static void do_syslogd(const int sockfd, const int logfd)
 {
     static char buf[1024];
     sigset_t mask;
     ssize_t len, out, total;
-    int sig;
 
     if (prctl(PR_SET_NAME, "syslogd") < 0)
         return;
 
-    if ((sigemptyset(&mask) < 0) ||
-        (sigaddset(&mask, SIGTERM) < 0) ||
-        (sigaddset(&mask, iosig) < 0) ||
-        (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
+    if ((sigfillset(&mask) < 0) ||
+        (sigprocmask(SIG_UNBLOCK, &mask, NULL) < 0))
         return;
 
     if (fcntl(sockfd, F_SETOWN, getpid()) < 0)
         return;
 
     while (1) {
-        if (sigwait(&mask, &sig) < 0)
+        len = recv(sockfd, buf, sizeof(buf) - 2, 0);
+        if (len <= 0)
             break;
 
-        if (sig == SIGTERM)
-            break;
-        else if (sig == iosig) {
-            while (1) {
-                len = recv(sockfd, buf, sizeof(buf) - 2, 0);
-                if (len < 0) {
-                    if (errno == EAGAIN)
-                        break;
-                    else
-                        return;
-                }
-                else if (len == 0)
-                    continue;
+        if (buf[len - 1] != '\n') {
+            buf[len] = '\n';
+            ++len;
+            buf[len] = '\0';
+        }
 
-                if (buf[len - 1] != '\n') {
-                    buf[len] = '\n';
-                    ++len;
-                    buf[len] = '\0';
-                }
-
-                for (total = 0; total < len; total += out) {
-                    out = write(logfd, buf + total, (size_t)len - total);
-                    if (out <= 0)
-                        return;
-                }
-            }
+        for (total = 0; total < len; total += out) {
+            out = write(logfd, buf + total, (size_t)len - total);
+            if (out <= 0)
+                return;
         }
     }
 }
@@ -743,7 +725,6 @@ static int syslogd(void)
 {
     autoclose int sockfd = -1, logfd = -1;
     pid_t pid;
-    int iosig = SIGRTMIN, flags;
 
     sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
     if (sockfd < 0)
@@ -753,12 +734,7 @@ static int syslogd(void)
     if (bind(sockfd, (struct sockaddr *)&devlog, sizeof(devlog)) < 0)
         return -1;
 
-    flags = fcntl(sockfd, F_GETFL);
-    if (flags < 0)
-        return -1;
-
-    if ((fcntl(sockfd, F_SETFL, flags | O_NONBLOCK | O_ASYNC) < 0) ||
-        (fcntl(sockfd, F_SETSIG, iosig) < 0))
+    if ((mkdir("/var/log", 0755) < 0) && (errno != EEXIST))
         return -1;
 
     logfd = open("/var/log/messages", O_CREAT | O_TRUNC | O_WRONLY, 0600);
@@ -767,7 +743,7 @@ static int syslogd(void)
 
     pid = fork();
     if (pid == 0) {
-        do_syslogd(sockfd, logfd, iosig);
+        do_syslogd(sockfd, logfd);
         exit(EXIT_FAILURE);
     }
     else if (pid < 0)
@@ -786,8 +762,8 @@ static void do_klogd(const int kmsg)
     if (prctl(PR_SET_NAME, "klogd") < 0)
         return;
 
-    if ((sigemptyset(&mask) < 0) ||
-        (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
+    if ((sigfillset(&mask) < 0) ||
+        (sigprocmask(SIG_UNBLOCK, &mask, NULL) < 0))
         return;
 
     sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -1022,13 +998,12 @@ cpy:
     if (mount("dev", "/dev", "devtmpfs", 0, NULL) < 0)
         return EXIT_FAILURE;
 
-    if (syslogd() == 0) {
-        // klogd reads from /proc/kmsg
-        if (mount("proc", "/proc", "proc", 0, NULL) < 0)
-            return EXIT_FAILURE;
+    // klogd reads from /proc/kmsg
+    if (mount("proc", "/proc", "proc", 0, NULL) < 0)
+        return EXIT_FAILURE;
 
+    if (syslogd() == 0)
         klogd();
-    }
 
     if (!ro && !(bootcodes & BOOTCODE_RAM))
         fstrimd();
