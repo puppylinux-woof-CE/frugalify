@@ -164,6 +164,8 @@ static int init(void)
     siginfo_t sig = {.si_signo = SIGUSR2};
     int status, ret;
 
+    openlog("init", 0, LOG_DAEMON);
+
     /* block SIGCHLD, SIGTERM (poweroff) and SIGUSR2 (reboot) */
     if ((sigemptyset(&mask) < 0) ||
         (sigaddset(&mask, SIGCHLD) < 0) ||
@@ -172,12 +174,13 @@ static int init(void)
         (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
         goto shutdown;
 
+    syslog(LOG_INFO, "running init script");
     if (initscript() < 0)
         goto shutdown;
 
     write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY) - 1);
 
-    /* run a login shell */
+    syslog(LOG_INFO, "starting login shell");
     pid = cttyhack();
     if (pid < 0)
         goto shutdown;
@@ -199,6 +202,8 @@ static int init(void)
             continue;
 
         if (sig.si_pid == pid) {
+            syslog(LOG_INFO, "restarting login shell");
+
             pid = cttyhack();
             if (pid < 0)
                 goto shutdown;
@@ -206,6 +211,8 @@ static int init(void)
     } while (1);
 
 shutdown:
+    closelog();
+
     ret = kill(-1, SIGTERM);
     sleep(2);
     if (ret == 0)
