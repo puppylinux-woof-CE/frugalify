@@ -403,11 +403,11 @@ static void fscrypt(const char *path)
 
 #endif
 
-static int oom_score_adj(const int proc)
+static int oom_score_adj(void)
 {
     autoclose int adj = -1;
 
-    adj = openat(proc, "self/oom_score_adj", O_WRONLY);
+    adj = open("/proc/self/oom_score_adj", O_WRONLY);
     if (adj < 0)
         return -1;
 
@@ -462,11 +462,11 @@ static void do_pfixram(char **sfs, const int nsfs)
         }
 
         p = mmap(NULL,
-                (size_t)stbuf.st_size,
-                PROT_READ,
-                MAP_PRIVATE | MAP_POPULATE,
-                fd,
-                0);
+                 (size_t)stbuf.st_size,
+                 PROT_READ,
+                 MAP_PRIVATE | MAP_POPULATE,
+                 fd,
+                 0);
         if (p == MAP_FAILED) {
             if (errno == ENOMEM)
                 return;
@@ -484,6 +484,7 @@ static void do_pfixram(char **sfs, const int nsfs)
             continue;
         }
 
+        syslog(LOG_INFO, "locked %s to RAM", sfs[i]);
         ++locked;
     }
 
@@ -497,30 +498,28 @@ static void do_pfixram(char **sfs, const int nsfs)
 
 static void pfixram(char **sfs, const int nsfs)
 {
-    autoclose int proc = -1;
-
-    proc = open("/upper/save/proc", O_DIRECTORY);
-    if (proc < 0)
-        return;
-
     if (fork() == 0) {
+        if (chdir("/initrd") < 0)
+            exit(EXIT_FAILURE);
+
         // lower our priority so we don't starve I/O intensive applications
         if (setpriority(PRIO_PROCESS, 0, 10) < 0)
             exit(EXIT_FAILURE);
 
         // pfixram should be the first process to kill when out of memory
-        if (oom_score_adj(proc) < 0)
+        if (oom_score_adj() < 0)
             exit(EXIT_FAILURE);
 
-        close(proc);
-        proc = -1;
+        openlog("pfixram", 0, LOG_DAEMON);
 
         do_pfixram(sfs, nsfs);
+
+        closelog();
         exit(EXIT_FAILURE);
     }
 }
 
-static int memexec(char *argv[])
+static int memexec(const int self, char *argv[])
 {
     struct stat stbuf;
     char buf[16];
@@ -528,10 +527,12 @@ static int memexec(char *argv[])
     ssize_t out;
     const char *comm;
     void *p;
-    autoclose int memfd = -1, self = -1;
+    autoclose int memfd = -1;
 
     comm = getenv("COMM");
     if (comm) {
+        close(self);
+
         if (unsetenv("COMM") < 0)
             return -1;
 
@@ -549,10 +550,6 @@ static int memexec(char *argv[])
         return -1;
 
     if (fcntl(memfd, F_SETFD, FD_CLOEXEC) < 0)
-        return -1;
-
-    self = open("/upper/save/proc/self/exe", O_RDONLY);
-    if (self < 0)
         return -1;
 
     if ((fstat(self, &stbuf) < 0) || (stbuf.st_size == 0))
@@ -577,7 +574,6 @@ static int memexec(char *argv[])
 
     munmap(p, (size_t)stbuf.st_size);
     close(self);
-    self = -1;
 
     return fexecve(memfd, argv, environ);
 }
@@ -850,7 +846,7 @@ int main(int argc, char *argv[])
     ssize_t out;
     DIR *root;
     struct dirent *pent;
-    int nsfs = 0, i, ro = 0;
+    int nsfs = 0, i, ro = 0, self;
     unsigned int bootcodes = 0;
 
     // protect against accidental click
@@ -910,8 +906,12 @@ int main(int argc, char *argv[])
     if (!ro && ((mkdir("/upper", 0755) < 0) && (errno != EEXIST)))
         return EXIT_FAILURE;
 
-    // temporarily mount proc at /upper, only to parse cmdline
+    // temporarily mount proc at /upper, only to parse cmdline and access /proc/self/exe
     if (mount("proc", "/upper", "proc", 0, NULL) < 0)
+        return EXIT_FAILURE;
+
+    self = open("/upper/self/exe", O_RDONLY);
+    if (self < 0)
         return EXIT_FAILURE;
 
     if (getcodes(&bootcodes) < 0)
@@ -932,23 +932,13 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
     }
 
-    // mount proc so we can read the executable from /proc/self/exe
-    if (mount("proc", "/upper/save/proc", "proc", 0, NULL) < 0)
-        return EXIT_FAILURE;
-
     // re-run the executable from RAM, so it can be updated on disk while
     // running
-    if (memexec(argv) < 0)
+    if (memexec(self, argv) < 0)
         return EXIT_FAILURE;
 
     // make sure adrv, zdrv, etc' come after the main SFS
     qsort(sfs, (size_t)nsfs, sizeof(sfs[0]), sfscmp);
-
-    if (!(bootcodes & BOOTCODE_NOCOPY))
-        pfixram(sfs, nsfs);
-
-    umount2("/upper/save/proc", MNT_DETACH);
-    rmdir("/upper/save/proc");
 
     // mount a devtmpfs so we have the loop%d device nodes
     if (mount("dev", "/upper/save/dev", "devtmpfs", 0, NULL) < 0)
@@ -1042,6 +1032,9 @@ cpy:
 
     if (!ro && !(bootcodes & BOOTCODE_RAM))
         fstrimd();
+
+    if (!(bootcodes & BOOTCODE_NOCOPY))
+        pfixram(sfs, nsfs);
 
     // run the real init under the new root file system
     return init();
