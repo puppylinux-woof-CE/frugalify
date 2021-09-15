@@ -24,6 +24,10 @@
 #include <linux/fs.h>
 #include <time.h>
 #include <limits.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/klog.h>
+#include <syslog.h>
 
 #ifdef HAVE_FSCRYPT
 #   include <linux/fscrypt.h>
@@ -64,6 +68,8 @@ enum {
     BOOTCODE_NOCOPY = 1,
     BOOTCODE_RAM    = 1 << 1,
 };
+
+static const struct sockaddr_un devlog = {.sun_family = AF_UNIX, .sun_path = "/dev/log"};
 
 static inline void do_autoclose(void *fdp)
 {
@@ -624,7 +630,11 @@ static void fstrim(const int fd)
          (stbuf.st_mtim.tv_nsec >= prev.tv_nsec)))
         return;
 
-    ioctl(fd, FITRIM, &range);
+    if (ioctl(fd, FITRIM, &range) == 0)
+        syslog(LOG_INFO, "successfully discarded unused blocks");
+    else
+        syslog(LOG_WARNING, "failed to discard unused blocks: %d", errno);
+
     futimens(fd, NULL);
 }
 
@@ -657,14 +667,155 @@ static void fstrimd(void)
 {
     autoclose int fd = -1;
 
-    fd = open("/upper", O_DIRECTORY);
+    fd = open("/initrd/upper", O_DIRECTORY);
     if (fd < 0)
         return;
 
     fstrim(fd);
 
     if (fork() == 0) {
+        openlog("fstrimd", 0, LOG_DAEMON);
+
         do_fstrimd(fd);
+
+        closelog();
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void do_syslogd(const int sockfd, const int logfd, const int iosig)
+{
+    static char buf[1024];
+    sigset_t mask;
+    ssize_t len, out, total;
+    int sig;
+
+    if (prctl(PR_SET_NAME, "syslogd") < 0)
+        return;
+
+    if ((sigemptyset(&mask) < 0) ||
+        (sigaddset(&mask, SIGTERM) < 0) ||
+        (sigaddset(&mask, iosig) < 0) ||
+        (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
+        return;
+
+    if (fcntl(sockfd, F_SETOWN, getpid()) < 0)
+        return;
+
+    while (1) {
+        if (sigwait(&mask, &sig) < 0)
+            break;
+
+        if (sig == SIGTERM)
+            break;
+        else if (sig == iosig) {
+            while (1) {
+                len = recv(sockfd, buf, sizeof(buf) - 2, 0);
+                if (len < 0) {
+                    if (errno == EAGAIN)
+                        break;
+                    else
+                        return;
+                }
+                else if (len == 0)
+                    continue;
+
+                if (buf[len - 1] != '\n') {
+                    buf[len] = '\n';
+                    ++len;
+                    buf[len] = '\0';
+                }
+
+                for (total = 0; total < len; total += out) {
+                    out = write(logfd, buf + total, (size_t)len - total);
+                    if (out <= 0)
+                        return;
+                }
+            }
+        }
+    }
+}
+
+static int syslogd(void)
+{
+    autoclose int sockfd = -1, logfd = -1;
+    pid_t pid;
+    int iosig = SIGRTMIN, flags;
+
+    sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (sockfd < 0)
+        return -1;
+
+    unlink(devlog.sun_path);
+    if (bind(sockfd, (struct sockaddr *)&devlog, sizeof(devlog)) < 0)
+        return -1;
+
+    flags = fcntl(sockfd, F_GETFL);
+    if (flags < 0)
+        return -1;
+
+    if ((fcntl(sockfd, F_SETFL, flags | O_NONBLOCK | O_ASYNC) < 0) ||
+        (fcntl(sockfd, F_SETSIG, iosig) < 0))
+        return -1;
+
+    logfd = open("/var/log/messages", O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    if (logfd < 0)
+        return -1;
+
+    pid = fork();
+    if (pid == 0) {
+        do_syslogd(sockfd, logfd, iosig);
+        exit(EXIT_FAILURE);
+    }
+    else if (pid < 0)
+        return -1;
+
+    return 0;
+}
+
+static void do_klogd(const int kmsg)
+{
+    static char buf[1024];
+    sigset_t mask;
+    ssize_t len;
+    int sockfd;
+
+    if (prctl(PR_SET_NAME, "klogd") < 0)
+        return;
+
+    if ((sigemptyset(&mask) < 0) ||
+        (sigprocmask(SIG_SETMASK, &mask, NULL) < 0))
+        return;
+
+    sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (sockfd < 0)
+        return;
+
+    if (connect(sockfd, (const struct sockaddr *)&devlog, sizeof(devlog)) < 0)
+        return;
+
+    if (klogctl(6, NULL, 0) < 0)
+        return;
+
+    while (1) {
+        len = read(kmsg, buf, sizeof(buf));
+        if (len <= 0)
+            break;
+
+        send(sockfd, buf, (size_t)len, 0);
+    }
+}
+
+static void klogd(void)
+{
+    autoclose int kmsg = -1;
+
+    kmsg = open("/proc/kmsg", O_RDONLY);
+    if (kmsg < 0)
+        return;
+
+    if (fork() == 0) {
+        do_klogd(kmsg);
         exit(EXIT_FAILURE);
     }
 }
@@ -789,9 +940,6 @@ int main(int argc, char *argv[])
     if (!(bootcodes & BOOTCODE_NOCOPY))
         pfixram(sfs, nsfs);
 
-    if (!ro && !(bootcodes & BOOTCODE_RAM))
-        fstrimd();
-
     umount2("/upper/save/proc", MNT_DETACH);
     rmdir("/upper/save/proc");
 
@@ -872,6 +1020,21 @@ cpy:
 
     if (chdir("/") < 0)
         return EXIT_FAILURE;
+
+    if (!ro && !(bootcodes & BOOTCODE_RAM))
+        fstrimd();
+
+    // syslogd creates /dev/log, so we must mount /dev before starting it
+    if (mount("dev", "/dev", "devtmpfs", 0, NULL) < 0)
+        return EXIT_FAILURE;
+
+    if (syslogd() == 0) {
+        // klogd reads from /proc/kmsg
+        if (mount("proc", "/proc", "proc", 0, NULL) < 0)
+            return EXIT_FAILURE;
+
+        klogd();
+    }
 
     // run the real init under the new root file system
     return init();

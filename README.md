@@ -65,6 +65,10 @@ In every boot, the user is required to specify a passphrase. frugalify computes 
 
 frugalify spawns a child process, fstrimd, which simulates fstrim(8) once a week.
 
+## Logging
+
+frugalify spawns two child processes responsible for logging: syslogd and klogd.
+
 ## Boot Options
 
 frugalify supports the following Puppy boot options:
