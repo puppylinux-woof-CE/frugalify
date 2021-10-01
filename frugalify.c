@@ -63,6 +63,7 @@ struct fstrim_range {
 #define RESET_TTY "\033[39m\033[49m"
 
 #define FSTRIM_FREQ (60 * 60 * 24 * 7)
+#define RESPAWN_DELAY 1
 
 enum {
     BOOTCODE_NOCOPY = 1,
@@ -116,7 +117,22 @@ static void do_cttyhack(void)
     fakelogin();
 }
 
-static pid_t cttyhack(void)
+static void delay(const time_t sec)
+{
+    struct timespec req = {.tv_sec = sec}, rem;
+
+    while (1) {
+        if (nanosleep(&req, &rem) == 0)
+            break;
+
+        if (errno != EINTR)
+            break;
+
+        memcpy(&req, &rem, sizeof(struct timespec));
+    }
+}
+
+static pid_t cttyhack(const time_t sec)
 {
     pid_t pid;
     sigset_t mask;
@@ -126,6 +142,9 @@ static pid_t cttyhack(void)
         if ((sigfillset(&mask) < 0) ||
             (sigprocmask(SIG_UNBLOCK, &mask, NULL) < 0))
             exit(EXIT_FAILURE);
+
+        if (sec > 0)
+            delay(sec);
 
         do_cttyhack();
         exit(EXIT_FAILURE);
@@ -181,7 +200,7 @@ static int init(void)
     write(STDOUT_FILENO, CLEAR_TTY, sizeof(CLEAR_TTY) - 1);
 
     syslog(LOG_INFO, "starting login shell");
-    pid = cttyhack();
+    pid = cttyhack(0);
     if (pid < 0)
         goto shutdown;
 
@@ -204,7 +223,7 @@ static int init(void)
         if (sig.si_pid == pid) {
             syslog(LOG_INFO, "restarting login shell");
 
-            pid = cttyhack();
+            pid = cttyhack(RESPAWN_DELAY);
             if (pid < 0)
                 goto shutdown;
         }
