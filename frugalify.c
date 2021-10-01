@@ -718,9 +718,6 @@ static void do_syslogd(const int sockfd, const int logfd)
         (sigprocmask(SIG_UNBLOCK, &mask, NULL) < 0))
         return;
 
-    if (fcntl(sockfd, F_SETOWN, getpid()) < 0)
-        return;
-
     while (1) {
         len = recv(sockfd, buf, sizeof(buf) - 2, 0);
         if (len <= 0)
