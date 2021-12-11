@@ -372,7 +372,7 @@ static int sfscmp(const void *a, const void *b)
     if ((m != 0) && (n == 0))
         return -1;
 
-    return 0;
+    return -strverscmp(abase, bbase);
 }
 
 #ifdef HAVE_FSCRYPT
