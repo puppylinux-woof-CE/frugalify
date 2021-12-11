@@ -37,6 +37,9 @@
 #ifndef LOOP_CTL_GET_FREE
 #   define LOOP_CTL_GET_FREE 0x4C82
 #endif
+#ifndef LOOP_CTL_REMOVE
+#   define LOOP_CTL_REMOVE 0x4C81
+#endif
 
 #ifndef FITRIM
 #   define FITRIM _IOWR('X', 121, struct fstrim_range)
@@ -48,7 +51,7 @@ struct fstrim_range {
 };
 #endif
 
-#define MAXSFS 8
+#define MAXSFS 32
 
 #ifdef HAVE_AUFS
 #   define FS "aufs"
@@ -261,9 +264,29 @@ static char *itoa(char *s, int i)
     return s;
 }
 
-static char *get_lo_path(const int i)
+static int get_free_lo(void)
 {
-    static char loop[sizeof("/upper/save/dev/loop0")] = "/upper/save/dev/loop";
+    autoclose int ctl = -1;
+
+    ctl = open("/upper/save/dev/loop-control", O_RDONLY);
+    if (ctl < 0)
+        return -1;
+
+    return ioctl(ctl, LOOP_CTL_GET_FREE);
+}
+
+static void remove_lo(int id)
+{
+    autoclose int ctl = -1;
+
+    ctl = open("/dev/loop-control", O_RDONLY);
+    if (ctl > 0)
+        ioctl(ctl, LOOP_CTL_REMOVE, id);
+}
+
+static char *get_lo_path(int i)
+{
+    static char loop[sizeof("/upper/save/dev/loop99")] = "/upper/save/dev/loop";
 
     itoa(loop + sizeof("/upper/save/dev/loop") - 1, i);
     return loop;
@@ -308,11 +331,19 @@ static const char *losetup(const char *sfs, const int i)
 
 static void losetup_d(const int i)
 {
-    autoclose int loopfd = -1;
-    
+    int loopfd;
+    autoclose int ctl = -1;
+
     loopfd = open(get_lo_path(i), O_RDWR);
-    if (loopfd >= 0)
-        ioctl(loopfd, LOOP_CLR_FD, 0);
+    if (loopfd < 0)
+        return;
+
+    ioctl(loopfd, LOOP_CLR_FD);
+    close(loopfd);
+
+    ctl = open("/upper/save/dev/loop-control", O_RDONLY);
+    if (ctl >= 0)
+        ioctl(ctl, LOOP_CTL_REMOVE, i);
 }
 
 static int sfscmp(const void *a, const void *b)
@@ -832,13 +863,13 @@ int main(int argc, char *argv[])
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
     struct statvfs vfs;
-    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/upper/.sfs0")] = "/upper/.sfs";
+    char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/upper/.sfs99")] = "/upper/.sfs";
     const char *loop;
     size_t len, brlen = sizeof(FSOPTS_HEAD) - 1;
     ssize_t out;
     DIR *root;
     struct dirent *pent;
-    int nsfs = 0, i, ro = 0, self;
+    int nsfs = 0, i, ro = 0, self, loopid;
     unsigned int bootcodes = 0;
 
     // protect against accidental click
@@ -942,16 +973,25 @@ int main(int argc, char *argv[])
         if ((mkdir(sfsmnt, 0755) < 0) && (errno != EEXIST))
             continue;
 
+        // find a free loop device or allocate a new one
+        loopid = get_free_lo();
+        if (loopid < 0) {
+            rmdir(sfsmnt);
+            continue;
+        }
+
         // bind the SFS to a loop device
-        loop = losetup(sfs[i], i);
+        loop = losetup(sfs[i], loopid);
         if (!loop) {
+            remove_lo(loopid);
             rmdir(sfsmnt);
             continue;
         }
 
         // mount the loop device
         if (mount(loop, sfsmnt, "squashfs", MS_RDONLY, "") < 0) {
-            losetup_d(i);
+            losetup_d(loopid);
+            remove_lo(loopid);
             rmdir(sfsmnt);
             continue;
         }
@@ -971,8 +1011,14 @@ int main(int argc, char *argv[])
 #ifndef HAVE_AUFS
 cpy:
 #endif
-        memcpy(&br[brlen], sfsmnt, sizeof("/upper/.sfs0") - 1);
-        brlen += sizeof("/upper/.sfs0") - 1;
+        if (i < 10) {
+            memcpy(&br[brlen], sfsmnt, sizeof("/upper/.sfs9") - 1);
+            brlen += sizeof("/upper/.sfs9") - 1;
+        }
+        else {
+            memcpy(&br[brlen], sfsmnt, sizeof("/upper/.sfs99") - 1);
+            brlen += sizeof("/upper/.sfs99") - 1;
+        }
     }
     br[brlen] = '\0';
     
