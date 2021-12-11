@@ -975,16 +975,13 @@ int main(int argc, char *argv[])
 
         // find a free loop device or allocate a new one
         loopid = get_free_lo();
-        if (loopid < 0) {
-            rmdir(sfsmnt);
+        if (loopid < 0)
             continue;
-        }
 
         // bind the SFS to a loop device
         loop = losetup(sfs[i], loopid);
         if (!loop) {
             remove_lo(loopid);
-            rmdir(sfsmnt);
             continue;
         }
 
@@ -992,7 +989,6 @@ int main(int argc, char *argv[])
         if (mount(loop, sfsmnt, "squashfs", MS_RDONLY, "") < 0) {
             losetup_d(loopid);
             remove_lo(loopid);
-            rmdir(sfsmnt);
             continue;
         }
     }
