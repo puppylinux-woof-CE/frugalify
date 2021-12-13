@@ -697,6 +697,8 @@ static void do_fstrimd(const int fd)
     struct timespec ts = {.tv_sec = FSTRIM_FREQ + 120};
     sigset_t mask;
 
+    fstrim(fd);
+
     if (prctl(PR_SET_NAME, "fstrimd") < 0)
         return;
 
@@ -723,8 +725,6 @@ static void fstrimd(void)
     fd = open("/initrd/upper", O_DIRECTORY);
     if (fd < 0)
         return;
-
-    fstrim(fd);
 
     if (fork() == 0) {
         openlog("fstrimd", 0, LOG_DAEMON);
