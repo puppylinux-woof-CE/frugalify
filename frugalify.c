@@ -467,8 +467,55 @@ static int oom_score_adj(void)
     return 0;
 }
 
+static int get_ver(char *buf, size_t len)
+{
+    static char *const argv[] = {
+        "/bin/sh",
+        "-c",
+        ". /etc/DISTRO_SPECS && echo -n \"$DISTRO_VERSION\"",
+        NULL
+    };
+    int pipefd[2];
+    ssize_t out;
+    autoclose int infd = -1, outfd = -1;
+    pid_t pid;
+    int status;
+
+    if (pipe(pipefd) < 0)
+        return -1;
+
+    infd = pipefd[0];
+    outfd = pipefd[1];
+
+    pid = fork();
+    switch (pid) {
+    case 0:
+        if (dup2(outfd, STDOUT_FILENO) == STDOUT_FILENO)
+            execv(argv[0], argv);
+
+        exit(EXIT_FAILURE);
+
+    case -1:
+        return -1;
+    }
+
+    if (waitpid(pid, &status, 0) != pid)
+        return -1;
+
+    out = read(infd, buf, len - 1);
+    if ((out <= 0) || (out == (len - 1)))
+        return -1;
+
+    if ((buf[0] < '0') || (buf[0] > '9'))
+        return -1;
+
+    buf[out] = '\0';
+    return 0;
+}
+
 static void do_pfixram(char **sfs, const int nsfs)
 {
+    static char ver[sizeof("999.999.999")];
     struct stat stbuf;
     sigset_t mask;
     const char *base;
@@ -488,6 +535,9 @@ static void do_pfixram(char **sfs, const int nsfs)
     if (minsize <= 0)
         return;
 
+    if (get_ver(ver, sizeof(ver)) < 0)
+        ver[0] = '\0';
+
     for (i = nsfs -1; i >= 0; --i) {
         base = strrchr(sfs[i], '/');
         if (base)
@@ -500,6 +550,9 @@ static void do_pfixram(char **sfs, const int nsfs)
             (strncmp(base, "devx_", sizeof("devx_") - 1) == 0) ||
             (strncmp(base, "docx_", sizeof("docx_") - 1) == 0) ||
             (strncmp(base, "nlsx_", sizeof("nlsx_") - 1) == 0))
+            continue;
+
+        if (ver[0] && !strstr(base, ver))
             continue;
 
         fd = open(sfs[i], O_RDONLY);
