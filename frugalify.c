@@ -363,6 +363,15 @@ static int sfscmp(const void *a, const void *b)
     else
         bbase = bs;
 
+    m = strncmp(abase, "bdrv_", sizeof("bdrv_") - 1);
+    n = strncmp(bbase, "bdrv_", sizeof("bdrv_") - 1);
+
+    if ((m == 0) && (n != 0))
+        return 1;
+
+    if ((m != 0) && (n == 0))
+        return -1;
+
     m = strncmp(abase, "puppy_", sizeof("puppy_") - 1);
     n = strncmp(bbase, "puppy_", sizeof("puppy_") - 1);
 
