@@ -1220,6 +1220,11 @@ cpy:
     if (mountroot(devroot, ro) < 0)
         return EXIT_FAILURE;
 
+    // also give processes running with the union file system as / a directory
+    // outside of the union file system that can be used to add aufs branches
+    if (mount("/mnt/home", "/initrd", NULL, MS_BIND, NULL) < 0)
+        return EXIT_FAILURE;
+
     if (syslogd() == 0)
         klogd();
 
