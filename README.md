@@ -40,7 +40,9 @@ frugalify simulates what the Puppy initramfs does:
 3. It locks the image contents into RAM, unless `pfix=nocopy` is specified.
 4. It creates the */upper* directory on the partition, or mounts a `tmpfs` when / is read-only or `pfix=ram` is specified.
 5. It mounts a union file system, with */upper/save* as the upper layer.
-6. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
+6. It re-mounts the boot partition under */mnt/%s*, to replace */dev/root* in */proc/mounts* with the actual block device name. Some old Puppy scripts try to detect the mount point of a partition using the block device name and */proc/mounts*, instead of using its unique *major:minor* combination and */proc/self/mountinfo*.
+7. It adds a bind mount at */initrd* and creates the */mnt/home* symlink, to simuate what the Puppy initramfs does.
+8. It runs the Puppy init script and a login shell under the union file system. Until commit 42350b2, frugalify used to pass control to /sbin/init, but now it runs the init script and starts a login shell without passing through busybox init, getty, login, etc', in order to speed up the boot process.
 
 The result is an initramfs-less Puppy installation that combines the advantages of both installation methods:
 1. The operating system is small, because it's compressed.
