@@ -720,7 +720,7 @@ static char *getroot(void)
     static char path[sizeof("/upper/dev/block/4294967295:4294967295")] = "/upper/dev/block/";
     struct stat stbuf;
     ssize_t out;
-    char *p, *dev;
+    char *p;
 
     if (stat("/", &stbuf) < 0)
         return NULL;
@@ -734,14 +734,7 @@ static char *getroot(void)
         return NULL;
 
     dst[out] = '\0';
-    p = basename(dst);
-
-    dev = p - (sizeof("/dev/") - 1);
-    if (dev < dst)
-        return NULL;
-
-    memcpy(dev, "/dev/", sizeof("/dev/") - 1);
-    return dev;
+    return basename(dst);
 }
 
 static int binmount(const char *dev, const char *target, const char *opts)
@@ -760,6 +753,58 @@ static int binmount(const char *dev, const char *target, const char *opts)
     reaped = waitpid(pid, &status, 0);
     if (((reaped < 0) && (errno != ECHILD)) ||
         (!WIFEXITED(status) || (WEXITSTATUS(status) != EXIT_SUCCESS)))
+        return -1;
+
+    return 0;
+}
+
+static int mountroot(const char *rootname, const int ro)
+{
+    static char rootdev[32] = "/dev/", rootmnt[32] = "/mnt/", dst[32];
+    ssize_t out;
+
+    strlcpy(rootmnt + sizeof("/mnt/") - 1, rootname, sizeof(rootmnt) - (sizeof("/mnt/") - 1));
+
+    if ((mkdir(rootmnt, 0755) < 0) && (errno != EEXIST))
+        return -1;
+
+    strlcpy(rootdev + sizeof("/dev/") - 1, rootname, sizeof(rootdev) - (sizeof("/dev/") - 1));
+
+    // mount the boot partition at /mnt/%s
+    if ((!ro && (binmount(rootdev, rootmnt, "noatime") < 0)) ||
+        (ro && (binmount(rootdev, rootmnt, "ro") < 0)))
+        return -1;
+
+    out = readlink("/mnt/home", dst, sizeof(dst));
+    if ((out > 0) && (out < sizeof(dst))) {
+        dst[out] = '\0';
+
+        // update the /mnt/home -> /mnt/%s symlink; some old scripts
+        // expect it to be a symlink, and expect an absolute path
+        if ((strcmp(dst, rootmnt) != 0) &&
+            ((unlink("/mnt/home") < 0) || (symlink(rootmnt, "/mnt/home") < 0)))
+            return -1;
+    }
+    else if (out < 0) {
+        switch (errno) {
+        case EINVAL:
+            // if /mnt/home is not a link, we want to delete it first
+            if (((rmdir("/mnt/home") == 0) || (unlink("/mnt/home") == 0)) &&
+                (symlink(rootmnt, "/mnt/home") < 0))
+                return -1;
+            break;
+
+        case ENOENT:
+            // if this is the first boot, /mnt/home is missing
+            if (symlink(rootmnt, "/mnt/home") < 0)
+                return -1;
+            break;
+
+        default:
+            return -1;
+        }
+    }
+    else
         return -1;
 
     return 0;
@@ -1172,15 +1217,7 @@ cpy:
     if (mount("proc", "/proc", "proc", 0, NULL) < 0)
         return EXIT_FAILURE;
 
-    // give access to the boot partition via /mnt/home, for compatibility
-    // with Puppy tools that assume its presence
-    if ((!ro && (binmount(devroot, "/mnt/home", "noatime") < 0)) ||
-        (ro && (binmount(devroot, "/mnt/home", "ro") < 0)))
-        return EXIT_FAILURE;
-
-    // also give processes running with the union file system as / a directory
-    // outside of the union file system that can be used to add aufs branches
-    if (mount("/mnt/home", "/initrd", NULL, MS_BIND, NULL) < 0)
+    if (mountroot(devroot, ro) < 0)
         return EXIT_FAILURE;
 
     if (syslogd() == 0)
