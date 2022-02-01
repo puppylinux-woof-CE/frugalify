@@ -28,6 +28,7 @@
 #include <sys/un.h>
 #include <sys/klog.h>
 #include <syslog.h>
+#include <sys/sysmacros.h>
 
 #ifdef HAVE_FSCRYPT
 #   include <linux/fscrypt.h>
@@ -713,6 +714,57 @@ static int getcodes(unsigned int *bootcodes)
     return 0;
 }
 
+static char *getroot(void)
+{
+    static char dst[512];
+    static char path[sizeof("/upper/dev/block/4294967295:4294967295")] = "/upper/dev/block/";
+    struct stat stbuf;
+    ssize_t out;
+    char *p, *dev;
+
+    if (stat("/", &stbuf) < 0)
+        return NULL;
+
+    p = itoa(path + sizeof("/upper/dev/block/") - 1, major(stbuf.st_dev));
+    *p = ':';
+    itoa(p + 1, minor(stbuf.st_dev));
+
+    out = readlink(path, dst, sizeof(dst));
+    if ((out <= 0) || (out >= sizeof(dst)))
+        return NULL;
+
+    dst[out] = '\0';
+    p = basename(dst);
+
+    dev = p - (sizeof("/dev/") - 1);
+    if (dev < dst)
+        return NULL;
+
+    memcpy(dev, "/dev/", sizeof("/dev/") - 1);
+    return dev;
+}
+
+static int binmount(const char *dev, const char *target, const char *opts)
+{
+    pid_t pid, reaped;
+    int status;
+
+    pid = fork();
+    if (pid == 0) {
+        execl("/bin/mount", "/bin/mount", "-o", opts, dev, target, (char *)NULL);
+        exit(EXIT_FAILURE);
+    }
+    else if (pid < 0)
+        return -1;
+
+    reaped = waitpid(pid, &status, 0);
+    if (((reaped < 0) && (errno != ECHILD)) ||
+        (!WIFEXITED(status) || (WEXITSTATUS(status) != EXIT_SUCCESS)))
+        return -1;
+
+    return 0;
+}
+
 static void fstrim(const int fd)
 {
     struct timespec now, prev;
@@ -916,8 +968,9 @@ int main(int argc, char *argv[])
     static char sfspath[MAXSFS][128], br[1024] = FSOPTS_HEAD;
     struct dirent ent[MAXSFS];
     struct statvfs vfs;
+    sigset_t set;
     char *sfs[MAXSFS] = {NULL}, sfsmnt[sizeof("/upper/.sfs99")] = "/upper/.sfs";
-    const char *loop;
+    const char *loop, *devroot;
     size_t len, brlen = sizeof(FSOPTS_HEAD) - 1;
     ssize_t out;
     DIR *root;
@@ -927,6 +980,11 @@ int main(int argc, char *argv[])
 
     // protect against accidental click
     if (getpid() != 1)
+        return EXIT_FAILURE;
+
+    if ((sigemptyset(&set) < 0) ||
+        (sigaddset(&set, SIGCHLD) < 0) ||
+        (sigprocmask(SIG_SETMASK, &set, NULL) < 0))
         return EXIT_FAILURE;
 
     // clear firmware and bootloader output on the screen
@@ -991,6 +1049,17 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
 
     if (getcodes(&bootcodes) < 0)
+        return EXIT_FAILURE;
+
+    umount2("/upper", MNT_DETACH);
+
+    // temporarily mount sys at /upper, only to detect /dev/root
+    if (mount("sys", "/upper", "sysfs", 0, NULL) < 0)
+        return EXIT_FAILURE;
+
+    // detect the root partition, so we can mount it directly and not as /dev/root
+    devroot = getroot();
+    if (!devroot)
         return EXIT_FAILURE;
 
     umount2("/upper", MNT_DETACH);
@@ -1079,16 +1148,6 @@ cpy:
     if (mount(FS, "/upper/.pup_new", FS, MS_NOATIME, br) < 0)
         return EXIT_FAILURE;
     
-    // give processes running with the union file system as / a directory
-    // outside of the union file system that can be used to add aufs branches
-    if (mount("/", "/upper/.pup_new/initrd", NULL, MS_BIND, NULL) < 0)
-        return EXIT_FAILURE;
-
-    // also give access to the boot partition via /mnt/home, for compatibility
-    // with Puppy tools that assume its presence
-    if (mount("/", "/upper/.pup_new/mnt/home", NULL, MS_BIND, NULL) < 0)
-        return EXIT_FAILURE;
-
     if (chdir("/upper/.pup_new") < 0)
         return EXIT_FAILURE;
 
@@ -1105,12 +1164,23 @@ cpy:
     if (chdir("/") < 0)
         return EXIT_FAILURE;
 
-    // syslogd creates /dev/log, so we must mount /dev before starting it
+    // we need access to the root partition device node
     if (mount("dev", "/dev", "devtmpfs", 0, NULL) < 0)
         return EXIT_FAILURE;
 
-    // klogd reads from /proc/kmsg
+    // mount reads /proc/filesystems
     if (mount("proc", "/proc", "proc", 0, NULL) < 0)
+        return EXIT_FAILURE;
+
+    // give processes running with the union file system as / a directory
+    // outside of the union file system that can be used to add aufs branches
+    if ((!ro && (binmount(devroot, "/initrd", "noatime") < 0)) ||
+        (ro && (binmount(devroot, "/initrd", "ro") < 0)))
+        return EXIT_FAILURE;
+
+    // also give access to the boot partition via /mnt/home, for compatibility
+    // with Puppy tools that assume its presence
+    if (mount("/initrd", "/mnt/home", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
 
     if (syslogd() == 0)
