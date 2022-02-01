@@ -237,7 +237,7 @@ shutdown:
     closelog();
 
     ret = kill(-1, SIGTERM);
-    sleep(2);
+    delay(2);
     if (ret == 0)
         kill(-1, SIGKILL);
 
