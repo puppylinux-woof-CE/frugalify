@@ -1172,15 +1172,15 @@ cpy:
     if (mount("proc", "/proc", "proc", 0, NULL) < 0)
         return EXIT_FAILURE;
 
-    // give processes running with the union file system as / a directory
-    // outside of the union file system that can be used to add aufs branches
-    if ((!ro && (binmount(devroot, "/initrd", "noatime") < 0)) ||
-        (ro && (binmount(devroot, "/initrd", "ro") < 0)))
+    // give access to the boot partition via /mnt/home, for compatibility
+    // with Puppy tools that assume its presence
+    if ((!ro && (binmount(devroot, "/mnt/home", "noatime") < 0)) ||
+        (ro && (binmount(devroot, "/mnt/home", "ro") < 0)))
         return EXIT_FAILURE;
 
-    // also give access to the boot partition via /mnt/home, for compatibility
-    // with Puppy tools that assume its presence
-    if (mount("/initrd", "/mnt/home", NULL, MS_BIND, NULL) < 0)
+    // also give processes running with the union file system as / a directory
+    // outside of the union file system that can be used to add aufs branches
+    if (mount("/mnt/home", "/initrd", NULL, MS_BIND, NULL) < 0)
         return EXIT_FAILURE;
 
     if (syslogd() == 0)
